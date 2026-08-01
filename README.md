@@ -22,6 +22,7 @@ Kista is Icelandic for chest - verkfaerakista is the toolchest.
 - `kista.fmt` - human-readable formatting (byte sizes).
 - `kista.platforminfo` - Linux distro detection with derivative
   mapping via ID_LIKE.
+- `kista.urls` - scraped-URL normalization.
 - `kista.dt` - timezone-aware UTC helpers.
 
 ## Usage
