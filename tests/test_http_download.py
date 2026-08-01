@@ -123,6 +123,42 @@ class TestDelay:
         assert 1.0 <= slept[0] <= 2.0
 
 
+class FakeHeadSession:
+    def __init__(self, headers, status=200):
+        self._headers = headers
+        self._status = status
+        self.last_kwargs = None
+
+    def head(self, url, **kwargs):
+        self.last_kwargs = kwargs
+        resp = FakeResponse([], headers=self._headers, status=self._status)
+        return resp
+
+
+class TestHeadInfo:
+    def test_reads_size_mtime_etag(self):
+        session = FakeHeadSession({
+            "Content-Length": "1234",
+            "Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT",
+            "ETag": '"abc"',
+        })
+        info = http.head_info(session, "https://x.example/f", timeout=5)
+        assert info.size_bytes == 1234
+        assert info.last_modified is not None
+        assert info.etag == '"abc"'
+        assert session.last_kwargs["allow_redirects"] is True
+
+    def test_missing_headers_are_none(self):
+        info = http.head_info(FakeHeadSession({}), "https://x/f", timeout=5)
+        assert info.size_bytes is None
+        assert info.last_modified is None
+        assert info.etag is None
+
+    def test_error_status_raises(self):
+        with pytest.raises(requests.HTTPError):
+            http.head_info(FakeHeadSession({}, status=404), "https://x/f", timeout=5)
+
+
 class TestCookies:
     def test_roundtrip(self, tmp_path):
         jar_path = tmp_path / "cookies.txt"

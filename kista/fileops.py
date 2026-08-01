@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import shutil
 import tempfile
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
@@ -41,6 +46,45 @@ def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
     finally:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
+
+
+def stamp_http_mtime(path: str | Path, last_modified: str) -> datetime | None:
+    """Stamp a file's mtime from an HTTP Last-Modified header value.
+
+    Empty or unparseable headers are a logged no-op, not an error - a
+    download must not fail because a server sends a broken date.
+    """
+    if not last_modified:
+        return None
+    try:
+        stamp = parsedate_to_datetime(last_modified)
+    except (ValueError, TypeError) as e:
+        logger.warning("Unparseable Last-Modified %r for %s: %s", last_modified, path, e)
+        return None
+    seconds = stamp.timestamp()
+    os.utime(path, (seconds, seconds))
+    return stamp
+
+
+def list_files(root: str | Path, exclude_top: tuple[str, ...] = ()) -> list[str]:
+    """Sorted relative paths of files and symlinks below root.
+
+    Directories are not listed. Dangling symlinks are - the caller's
+    cleanup pass decides what happens to them. exclude_top skips
+    whole top-level subtrees by name.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        raise FileNotFoundError(f"not a directory: {root}")
+    found = []
+    for entry in root.rglob("*"):
+        if not (entry.is_file() or entry.is_symlink()):
+            continue
+        rel = entry.relative_to(root)
+        if rel.parts[0] in exclude_top:
+            continue
+        found.append(str(rel))
+    return sorted(found)
 
 
 def copy_preserving(src: str | Path, dst: str | Path) -> None:

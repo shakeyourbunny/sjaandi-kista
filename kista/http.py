@@ -22,6 +22,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from kista import fileops
+
 logger = logging.getLogger(__name__)
 
 # One pinned browser identity. Bumping this constant moves the UA
@@ -268,17 +270,45 @@ def download(
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
 
+    last_modified = fileops.stamp_http_mtime(dest, response.headers.get("Last-Modified", ""))
+    return DownloadResult(path=dest, size_bytes=size, last_modified=last_modified)
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteInfo:
+    size_bytes: int | None
+    last_modified: datetime | None
+    etag: str | None
+
+
+def head_info(session, url: str, *, timeout: float,
+              headers: dict[str, str] | None = None) -> RemoteInfo:
+    """Size, mtime and ETag of a remote file via HEAD request."""
+    if not url or not url.strip():
+        raise ValueError("url must not be empty")
+    response = session.head(url, headers=headers, timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+
+    size = None
+    length_header = response.headers.get("Content-Length")
+    if length_header is not None:
+        try:
+            size = int(length_header)
+        except ValueError:
+            logger.warning("Non-numeric Content-Length %r for %s", length_header, url)
+
     last_modified = None
     lm_header = response.headers.get("Last-Modified")
     if lm_header:
         try:
             last_modified = parsedate_to_datetime(lm_header)
-            stamp = last_modified.timestamp()
-            os.utime(dest, (stamp, stamp))
-        except (ValueError, TypeError) as e:
-            logger.warning("Unparseable Last-Modified %r for %s: %s", lm_header, url, e)
-            last_modified = None
-    return DownloadResult(path=dest, size_bytes=size, last_modified=last_modified)
+        except (ValueError, TypeError):
+            logger.warning("Unparseable Last-Modified %r for %s", lm_header, url)
+    return RemoteInfo(
+        size_bytes=size,
+        last_modified=last_modified,
+        etag=response.headers.get("ETag"),
+    )
 
 
 def parse_delay(spec: str) -> tuple[float, float]:

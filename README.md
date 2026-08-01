@@ -16,6 +16,9 @@ Kista is Icelandic for chest - verkfaerakista is the toolchest.
 - `kista.paths` - containment guard (`resolve_within`) and archive
   entry normalization for hostile input.
 - `kista.testing` - hostile-input corpora for test parametrization.
+- `kista.fmt` - human-readable formatting (byte sizes).
+- `kista.platforminfo` - Linux distro detection with derivative
+  mapping via ID_LIKE.
 - `kista.dt` - timezone-aware UTC helpers.
 
 ## Usage
