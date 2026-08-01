@@ -6,13 +6,23 @@
 
 from __future__ import annotations
 
+import http.cookiejar
 import importlib.util
+import logging
+import os
+import random
+import tempfile
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # One pinned browser identity. Bumping this constant moves the UA
 # string and Sec-Ch-Ua together; nothing else may hardcode a version.
@@ -213,3 +223,104 @@ def session_for(profile: Profile) -> requests.Session:
     session = requests.Session()
     session.headers.update(profile.identity_headers())
     return session
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadResult:
+    path: Path
+    size_bytes: int
+    last_modified: datetime | None
+
+
+def download(
+    session,
+    url: str,
+    dest: str | Path,
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+    chunk_size: int = 65536,
+) -> DownloadResult:
+    """Stream url to dest: temp file + atomic rename, mtime stamped
+    from Last-Modified per the house download rule. Refuses to
+    overwrite; a failed transfer leaves nothing behind."""
+    if not url or not url.strip():
+        raise ValueError("url must not be empty")
+    dest = Path(dest)
+    if dest.exists():
+        raise FileExistsError(f"target already exists: {dest}")
+
+    response = session.get(url, headers=headers, timeout=timeout, stream=True)
+    size = 0
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
+    try:
+        response.raise_for_status()
+        with os.fdopen(fd, "wb") as f:
+            for chunk in response.iter_content(chunk_size):
+                f.write(chunk)
+                size += len(chunk)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_name, 0o644)
+        os.replace(tmp_name, dest)
+    finally:
+        response.close()
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+    last_modified = None
+    lm_header = response.headers.get("Last-Modified")
+    if lm_header:
+        try:
+            last_modified = parsedate_to_datetime(lm_header)
+            stamp = last_modified.timestamp()
+            os.utime(dest, (stamp, stamp))
+        except (ValueError, TypeError) as e:
+            logger.warning("Unparseable Last-Modified %r for %s: %s", lm_header, url, e)
+            last_modified = None
+    return DownloadResult(path=dest, size_bytes=size, last_modified=last_modified)
+
+
+def parse_delay(spec: str) -> tuple[float, float]:
+    """Parse a politeness delay spec: "3" or a "2-5" range, seconds."""
+    if not spec or not spec.strip():
+        raise ValueError("delay spec must not be empty")
+    spec = spec.strip()
+    try:
+        # A dash past position 0 is a range separator; at position 0
+        # it is a (rejected) negative sign.
+        if "-" in spec[1:]:
+            low_raw, high_raw = spec[1:].split("-", 1)
+            low, high = float(spec[0] + low_raw), float(high_raw)
+        else:
+            low = high = float(spec)
+    except ValueError:
+        raise ValueError(f"invalid delay spec: {spec!r}") from None
+    if low < 0 or high < 0:
+        raise ValueError(f"delay must not be negative: {spec!r}")
+    if high < low:
+        raise ValueError(f"delay range is reversed: {spec!r}")
+    return low, high
+
+
+def sleep_jitter(delay: tuple[float, float]) -> None:
+    low, high = delay
+    wait = random.uniform(low, high)  # nosec B311 - politeness jitter, not crypto
+    if wait > 1:
+        logger.debug("politeness delay: %.1fs", wait)
+    time.sleep(wait)
+
+
+def load_cookies(session: requests.Session, path: str | Path) -> None:
+    """Load a Mozilla-format cookie jar into the session; missing
+    file fails loudly."""
+    jar = http.cookiejar.MozillaCookieJar(str(path))
+    jar.load(ignore_discard=True, ignore_expires=True)
+    session.cookies.update(jar)
+
+
+def save_cookies(session: requests.Session, path: str | Path) -> None:
+    jar = http.cookiejar.MozillaCookieJar(str(path))
+    for cookie in session.cookies:
+        jar.set_cookie(cookie)
+    jar.save(ignore_discard=True, ignore_expires=True)

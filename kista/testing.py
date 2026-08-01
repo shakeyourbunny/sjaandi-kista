@@ -46,7 +46,7 @@ HOSTILE_FILE_PATHS = [
     ("traversal", "../../../../../../etc/passwd"),
     ("unc-path", "\\\\127.0.0.1\\c$\\windows\\system32"),
     ("windows-abs", "C:\\Windows\\System32\\config\\SAM"),
-    ("null-in-path", "/tmp/normal.img\x00/etc/passwd"),
+    ("null-in-path", "/tmp/normal.img\x00/etc/passwd"),  # nosec B108 - attack string, not a temp path
     ("dev-null", "/dev/null"),
     ("proc-environ", "/proc/self/environ"),
 ]
