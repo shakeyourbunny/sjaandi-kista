@@ -11,7 +11,7 @@ import logging
 import os
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -85,6 +85,53 @@ def list_files(root: str | Path, exclude_top: tuple[str, ...] = ()) -> list[str]
             continue
         found.append(str(rel))
     return sorted(found)
+
+
+def prune_candidates(
+    directory: str | Path,
+    pattern: str = "*",
+    max_age_days: float | None = None,
+    keep_newest: int | None = None,
+) -> list[Path]:
+    """Select files due for retention pruning; never deletes anything.
+
+    The caller decides what happens to the returned paths - delete,
+    archive, report. Age and keep-N criteria combine with OR.
+    Adapted from AmberChatLite's cleanup_old_files, split into
+    policy (here) and action (caller).
+    """
+    if max_age_days is None and keep_newest is None:
+        raise ValueError("at least one of max_age_days or keep_newest is required")
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+
+    files = [p for p in directory.glob(pattern) if p.is_file()]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    cutoff = None
+    if max_age_days is not None:
+        cutoff = datetime.now(UTC).timestamp() - max_age_days * 86400
+
+    selected = []
+    for index, path in enumerate(files):
+        too_old = cutoff is not None and path.stat().st_mtime < cutoff
+        overflow = keep_newest is not None and index >= keep_newest
+        if too_old or overflow:
+            selected.append(path)
+    return selected
+
+
+def available_name(path: str | Path) -> Path:
+    """First non-existing variant of path: name.ext, name_1.ext, ..."""
+    path = Path(path)
+    if not path.exists():
+        return path
+    for counter in range(1, 10000):
+        candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"no available name variant for {path}")
 
 
 def copy_preserving(src: str | Path, dst: str | Path) -> None:

@@ -2,4 +2,4 @@
 # License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
 #
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
