@@ -1,0 +1,28 @@
+# kista
+
+House toolchest. Small, well-scoped Python modules shared across the
+Projects family, so the same user agent handling, sanitizing and file
+routines stop getting rewritten per project.
+
+Kista is Icelandic for chest - verkfaerakista is the toolchest.
+
+## Modules
+
+- `kista.http` - HTTP request identity: consistent header profiles
+  (an honest tool profile and a complete browser ensemble), never
+  random user agents.
+- `kista.sanitize` - filename and path component sanitizing.
+- `kista.fileops` - atomic writes and timestamp-preserving copy/move.
+- `kista.dt` - timezone-aware UTC helpers.
+
+## Usage
+
+Install editable into a consumer project's venv:
+
+    .venv/bin/pip install -e ~/Projects/kista
+
+License: GPL-3.0-or-later.
+
+---
+This project is developed with tooled assistance, but tested, reviewed and
+signed off by a human developer.

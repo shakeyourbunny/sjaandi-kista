@@ -1,0 +1,10 @@
+#!/bin/bash
+# This file is part of the kista Project.
+# License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
+#
+
+source "$HOME/Projects/kista/.venv/bin/activate"
+python3 "$@"
+rc=$?
+deactivate
+exit $rc
