@@ -1,0 +1,12 @@
+Third-party libraries used by kista
+===================================
+
+requests
+  License: Apache-2.0
+  https://github.com/psf/requests
+
+pathvalidate
+  License: MIT
+  https://github.com/thombashi/pathvalidate
+  Used by kista.sanitize.sanitize_filename for cross-platform
+  filename validation.

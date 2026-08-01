@@ -4,12 +4,13 @@
 
 [project]
 name = "kista"
-version = "0.4.0"
+version = "0.5.0"
 description = "House toolchest: shared modules for the Projects family"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 dependencies = [
     "requests",
+    "pathvalidate",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["kista"]
+
+[tool.setuptools.package-data]
+kista = ["data/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,129 @@
+# mget — junk path patterns (substring match on lowercased URL path)
+# One pattern per line. Lines starting with # are comments. Blank lines ok.
+
+# ── WordPress ──
+/wp-admin/
+/wp-includes/
+/wp-json/
+/wp-login.php
+/wp-signup.php
+/wp-cron.php
+/wp-trackback.php
+/xmlrpc.php
+/wp-comments-post.php
+
+# ── Joomla / generic CMS admin ──
+/administrator/
+/admin/
+/admin.php
+
+# ── Drupal ──
+/user/login
+/user/register
+/user/password
+
+# ── Login / auth / account ──
+/login/
+/login.php
+/login.html
+/signin/
+/signup/
+/register/
+/logout/
+/logout.php
+/auth/
+/oauth/
+/sso/
+/account/
+/my-account/
+
+# ── Forums ──
+/forum/
+/forums/
+/phpBB3/
+/phpbb/
+/posting.php
+/viewtopic.php
+/memberlist.php
+/ucp.php
+/mcp.php
+/newthread.php
+/newreply.php
+/showthread.php
+/member.php
+/private.php
+/subscription.php
+/discussions/
+
+# ── Comments ──
+/comments/
+/comment/
+/trackback/
+/pingback/
+
+# ── Search ──
+/search/
+/search.php
+
+# ── User profiles ──
+/profile/
+/profiles/
+/members/
+/users/
+
+# ── Shopping ──
+/cart/
+/cart.php
+/checkout/
+/basket/
+/wishlist/
+
+# ── API endpoints ──
+/api/
+/rest/
+/graphql
+
+# ── Feeds ──
+/feed/
+/feeds/
+/rss/
+/rss.xml
+/atom.xml
+/feed.xml
+/sitemap.xml
+
+# ── Counter pixels / tracking endpoints ──
+/pixel
+/pixel/
+/beacon
+/beacon/
+/track
+/track/
+/tracking/
+
+# ── Server infrastructure ──
+/cgi-bin/
+/cgi/
+/phpmyadmin/
+/cpanel/
+/webmail/
+
+# ── Ad paths ──
+/ads/
+/advert/
+/adverts/
+
+# ── Tracking scripts ──
+/tracking.js
+/tracker.js
+/track.js
+/analytics.js
+/awstats_misc_tracker.js
+
+# ── Akwa analytics ──
+/akwa/
+/akwa.js
+
+# ── DoubleClick  ──
+/gpt.js
+

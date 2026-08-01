@@ -1,0 +1,19 @@
+# mget — junk host whitelist (bypass junk host matching)
+# One pattern per line. Lines starting with # are comments. Blank lines ok.
+# If a URL's netloc matches a whitelist entry, the junk host check is skipped.
+
+# Retro computing forums (bypass forum.* junk pattern)
+vcfed.org
+vogons.org
+betaarchive.com
+win3x.org
+oldskool.org
+classiccmp.org
+amiga.org
+atari-forum.com
+lemon64.com
+stardot.org.uk
+eab.abime.net
+86box.net
+pcem-emulator.co.uk
+dosbox.com
