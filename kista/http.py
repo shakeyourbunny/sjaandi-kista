@@ -242,10 +242,15 @@ def download(
     timeout: float,
     headers: dict[str, str] | None = None,
     chunk_size: int = 65536,
+    on_progress: callable | None = None,
 ) -> DownloadResult:
     """Stream url to dest: temp file + atomic rename, mtime stamped
     from Last-Modified per the house download rule. Refuses to
-    overwrite; a failed transfer leaves nothing behind."""
+    overwrite; a failed transfer leaves nothing behind.
+
+    on_progress(received_bytes, total_bytes_or_none) is called after
+    each chunk when provided.
+    """
     if not url or not url.strip():
         raise ValueError("url must not be empty")
     dest = Path(dest)
@@ -254,6 +259,13 @@ def download(
 
     response = session.get(url, headers=headers, timeout=timeout, stream=True)
     size = 0
+    total = None
+    length = response.headers.get("Content-Length")
+    if length is not None:
+        try:
+            total = int(length)
+        except ValueError:
+            pass
     fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
     try:
         response.raise_for_status()
@@ -261,6 +273,8 @@ def download(
             for chunk in response.iter_content(chunk_size):
                 f.write(chunk)
                 size += len(chunk)
+                if on_progress:
+                    on_progress(size, total)
             f.flush()
             os.fsync(f.fileno())
         os.chmod(tmp_name, 0o644)
