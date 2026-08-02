@@ -4,7 +4,7 @@
 
 [project]
 name = "kista"
-version = "0.7.0"
+version = "0.8.0"
 description = "House toolchest: shared modules for the Projects family"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -14,10 +14,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cache = [
+    "requests-cache",
+]
 dev = [
     "pytest",
     "ruff",
     "bandit",
+    "requests-cache",
 ]
 
 [build-system]

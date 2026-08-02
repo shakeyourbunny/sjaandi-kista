@@ -15,7 +15,7 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -223,6 +223,54 @@ def session_for(profile: Profile) -> requests.Session:
     if not isinstance(profile, Profile):
         raise TypeError(f"expected a Profile, got {type(profile).__name__}")
     session = requests.Session()
+    session.headers.update(profile.identity_headers())
+    return session
+
+
+def cached_session_for(
+    profile: Profile,
+    cache_name: str,
+    *,
+    expire_after: float | timedelta,
+    cache_dir: str | Path | None = None,
+) -> requests.Session:
+    """Backed by requests-cache (SQLite). The caller's expire_after is
+    authoritative - server Cache-Control is ignored, because API hosts
+    like GitHub send max-age=60 and would gut the cache (measured:
+    915 of 924 entries stale). After the TTL, entries with ETag or
+    Last-Modified revalidate conditionally; a GitHub 304 costs no
+    rate-limit quota. Needs the optional requests-cache dependency
+    (install kista[cache]).
+
+    cache_dir defaults to the platform user cache dir for cache_name.
+    Timeouts stay caller policy, same as session_for.
+    """
+    if not isinstance(profile, Profile):
+        raise TypeError(f"expected a Profile, got {type(profile).__name__}")
+    if not cache_name or not cache_name.strip():
+        raise ValueError("cache_name must not be empty")
+
+    try:
+        import requests_cache  # optional dependency, deferred
+    except ImportError as e:
+        raise ImportError(
+            "requests-cache is not installed - install the kista[cache] extra"
+        ) from e
+
+    if cache_dir is None:
+        # platformdirs comes in transitively with requests-cache
+        from platformdirs import user_cache_dir
+        cache_dir = Path(user_cache_dir(cache_name))
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    session = requests_cache.CachedSession(
+        str(cache_dir / "http-cache.sqlite"),
+        backend="sqlite",
+        expire_after=expire_after,
+        cache_control=False,
+        allowable_methods=("GET", "HEAD"),
+    )
     session.headers.update(profile.identity_headers())
     return session
 

@@ -1,2 +1,4 @@
 requests
 pathvalidate
+# optional, cache extra
+requests-cache

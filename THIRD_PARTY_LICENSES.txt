@@ -5,6 +5,12 @@ requests
   License: Apache-2.0
   https://github.com/psf/requests
 
+requests-cache (optional, cache extra)
+  License: BSD-2-Clause
+  https://github.com/requests-cache/requests-cache
+  Backs kista.http.cached_session_for with an on-disk
+  response cache.
+
 pathvalidate
   License: MIT
   https://github.com/thombashi/pathvalidate

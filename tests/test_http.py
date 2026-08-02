@@ -3,6 +3,7 @@
 #
 
 import pytest
+import requests
 
 from kista import http
 
@@ -144,3 +145,101 @@ class TestSession:
     def test_tool_session_carries_identity(self):
         session = http.session_for(http.tool_profile("t", "1.0"))
         assert session.headers["User-Agent"] == "t/1.0"
+
+
+class _CannedAdapter(requests.adapters.HTTPAdapter):
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def send(self, request, **kwargs):
+        import io
+
+        import urllib3
+
+        self.calls += 1
+        raw = urllib3.HTTPResponse(
+            body=io.BytesIO(b"hello"),
+            status=200,
+            headers={"Cache-Control": "max-age=300"},
+            preload_content=False,
+        )
+        return self.build_response(request, raw)
+
+
+class TestCachedSession:
+    def test_rejects_non_profile(self, tmp_path):
+        with pytest.raises(TypeError):
+            http.cached_session_for("no", "t", expire_after=60, cache_dir=tmp_path)
+
+    def test_rejects_empty_cache_name(self, tmp_path):
+        with pytest.raises(ValueError):
+            http.cached_session_for(
+                http.tool_profile("t", "1.0"), "  ",
+                expire_after=60, cache_dir=tmp_path,
+            )
+
+    def test_carries_identity_headers(self, tmp_path):
+        session = http.cached_session_for(
+            http.tool_profile("t", "1.0"), "t",
+            expire_after=60, cache_dir=tmp_path,
+        )
+        assert session.headers["User-Agent"] == "t/1.0"
+
+    def test_cache_file_lives_in_cache_dir(self, tmp_path):
+        http.cached_session_for(
+            http.tool_profile("t", "1.0"), "t",
+            expire_after=60, cache_dir=tmp_path,
+        )
+        assert (tmp_path / "http-cache.sqlite").is_file()
+
+    def test_second_get_served_from_cache(self, tmp_path):
+        session = http.cached_session_for(
+            http.tool_profile("t", "1.0"), "t",
+            expire_after=300, cache_dir=tmp_path,
+        )
+        adapter = _CannedAdapter()
+        session.mount("http://", adapter)
+
+        first = session.get("http://cache.test/data", timeout=5)
+        second = session.get("http://cache.test/data", timeout=5)
+
+        assert first.content == b"hello"
+        assert second.content == b"hello"
+        assert adapter.calls == 1
+        assert getattr(second, "from_cache", False)
+
+    def test_server_max_age_does_not_override_ttl(self, tmp_path):
+        # GitHub sends max-age=60; the caller's expire_after must win
+        # or the cache is useless for API crawls
+        import io
+
+        import urllib3
+
+        class ShortMaxAgeAdapter(requests.adapters.HTTPAdapter):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def send(self, request, **kwargs):
+                self.calls += 1
+                raw = urllib3.HTTPResponse(
+                    body=io.BytesIO(b"data"),
+                    status=200,
+                    headers={"Cache-Control": "private, max-age=0"},
+                    preload_content=False,
+                )
+                return self.build_response(request, raw)
+
+        session = http.cached_session_for(
+            http.tool_profile("t", "1.0"), "t",
+            expire_after=300, cache_dir=tmp_path,
+        )
+        adapter = ShortMaxAgeAdapter()
+        session.mount("http://", adapter)
+
+        session.get("http://cache.test/api", timeout=5)
+        second = session.get("http://cache.test/api", timeout=5)
+        assert adapter.calls == 1
+        assert getattr(second, "from_cache", False)
