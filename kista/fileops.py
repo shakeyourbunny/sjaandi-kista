@@ -162,3 +162,111 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
         dst.unlink()
         raise OSError(f"mtime not preserved copying {src} -> {dst}")
     src.unlink()
+
+
+def utc_now() -> datetime:
+    """The house never uses naive local time."""
+    return datetime.now(UTC)
+
+
+def _fsync_dir(dirpath: Path) -> None:
+    fd = os.open(dirpath, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _dev(path) -> int:
+    """Single choke point so the device-boundary logic stays testable."""
+    return os.lstat(path).st_dev
+
+
+def _assert_single_fs(directory: Path, root_dev: int) -> None:
+    """Under one mergerfs pool every branch shares st_dev, so this only trips
+    on a genuinely nested mount."""
+    with os.scandir(directory) as it:
+        for e in it:
+            if e.is_symlink():
+                continue
+            if e.is_dir(follow_symlinks=False):
+                if _dev(e.path) != root_dev:
+                    raise ValueError(
+                        f"device boundary (nested mount) at {e.path}; refusing "
+                        f"to cross - pass follow_mounts=True to override")
+                _assert_single_fs(Path(e.path), root_dev)
+
+
+def _rmtree_single_fs(directory: Path, root_dev: int) -> None:
+    """Re-checks st_dev per directory as defence against a mount appearing
+    after the pre-scan."""
+    with os.scandir(directory) as it:
+        for e in it:
+            if e.is_symlink():
+                os.unlink(e.path)
+            elif e.is_dir(follow_symlinks=False):
+                if _dev(e.path) != root_dev:
+                    raise ValueError(f"device boundary appeared mid-delete at {e.path}")
+                _rmtree_single_fs(Path(e.path), root_dev)
+            else:
+                os.unlink(e.path)
+    os.rmdir(directory)
+
+
+def remove_tree(target, within, *, follow_mounts: bool = False,
+                missing_ok: bool = False, dry_run: bool = False):
+    """Safer shutil.rmtree: deletes target only if it resolves to a real
+    directory strictly inside `within`, refusing symlinked targets, escapes
+    via .. or symlink, target == within, filesystem roots and mount points.
+
+    With follow_mounts=False it pre-scans and refuses outright rather than
+    deleting as far as a nested mount and stopping half-done; follow_mounts=True
+    falls back to shutil.rmtree and will cross into them."""
+    base = Path(within)
+    tgt = Path(target)
+
+    if not base.exists():
+        raise FileNotFoundError(f"containment base does not exist: {base}")
+    base_real = base.resolve(strict=True)
+    if not base_real.is_dir():
+        raise NotADirectoryError(f"containment base is not a directory: {base}")
+
+    if not tgt.exists() and not tgt.is_symlink():
+        if missing_ok:
+            return []
+        raise FileNotFoundError(f"target does not exist: {tgt}")
+    if tgt.is_symlink():
+        raise ValueError(f"refusing to remove a symlinked target: {tgt}")
+
+    tgt_real = tgt.resolve(strict=True)
+    if not tgt_real.is_dir():
+        raise NotADirectoryError(f"target is not a directory: {tgt} (use unlink for files)")
+
+    if tgt_real == base_real or not tgt_real.is_relative_to(base_real):
+        raise ValueError(f"target {tgt_real} is not strictly inside {base_real}")
+    if tgt_real.parent == tgt_real:
+        raise ValueError(f"refusing to remove filesystem root: {tgt_real}")
+
+    root_dev = _dev(tgt_real)
+    if not follow_mounts:
+        if os.path.ismount(tgt_real):
+            raise ValueError(f"refusing to remove a mount point: {tgt_real}")
+        if _dev(base_real) != root_dev:
+            raise ValueError(f"target is on a different device than base: {tgt_real}")
+
+    if dry_run:
+        out = [tgt_real]
+        for root, dirs, files in os.walk(tgt_real, followlinks=False):
+            for n in files: out.append(Path(root) / n)
+            for n in dirs:  out.append(Path(root) / n)
+        return sorted(out)
+
+    if follow_mounts:
+        shutil.rmtree(tgt_real)
+    else:
+        _assert_single_fs(tgt_real, root_dev)  # fail-fast, nothing deleted
+        _rmtree_single_fs(tgt_real, root_dev)
+    _fsync_dir(tgt_real.parent)
+    return [tgt_real]
