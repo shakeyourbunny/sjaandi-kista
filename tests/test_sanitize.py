@@ -63,3 +63,54 @@ class TestPathComponent:
     def test_only_hostile_chars_rejected(self):
         with pytest.raises(ValueError):
             sanitize.sanitize_path_component("///")
+
+
+class TestHumanize:
+    def test_ampersand_to_and(self):
+        assert sanitize.humanize("IBM PC & XT") == "IBM PC and XT"
+
+    def test_at_to_at(self):
+        assert sanitize.humanize("user@host") == "user at host"
+
+    def test_plus_to_and(self):
+        assert sanitize.humanize("C + D") == "C and D"
+
+    def test_no_double_spaces(self):
+        assert sanitize.humanize("A  &  B") == "A and B"
+
+    def test_passthrough(self):
+        assert sanitize.humanize("plain text") == "plain text"
+
+    def test_combined_with_sanitize(self):
+        result = sanitize.sanitize_filename(sanitize.humanize("DOS & BIOS"))
+        assert "and" in result
+        assert "&" not in result
+
+
+class TestDedevice:
+    """_dedevice owns reserved-name defusing; pathvalidate is told to keep its
+    hands off it, so these assertions must hold without the library helping."""
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("CON", "CON_"),
+        ("con", "con_"),
+        ("NUL", "NUL_"),
+        ("COM1", "COM1_"),
+        ("lpt9", "lpt9_"),
+        ("con.txt", "con_.txt"),
+        ("NUL.tar.gz", "NUL_.tar.gz"),
+    ])
+    def test_reserved_stems_get_trailing_underscore(self, raw, expected):
+        assert sanitize._dedevice(raw) == expected
+
+    @pytest.mark.parametrize("raw", [".", ".."])
+    def test_posix_reserved_collapse_to_underscore(self, raw):
+        assert sanitize._dedevice(raw) == "_"
+
+    @pytest.mark.parametrize("raw", ["normal.txt", "CONTENT", "COM", "COM10", "readme"])
+    def test_ordinary_names_untouched(self, raw):
+        assert sanitize._dedevice(raw) == raw
+
+    def test_idempotent(self):
+        once = sanitize._dedevice("CON")
+        assert sanitize._dedevice(once) == once
