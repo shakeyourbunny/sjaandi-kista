@@ -72,3 +72,85 @@ class TestLinuxDistro:
     def test_pretty_name_fallback(self, tmp_path):
         path = write_release(tmp_path, 'ID=void\nPRETTY_NAME="Void Linux"\n')
         assert platforminfo.linux_distro(path) == ("void", "Void Linux")
+
+
+class TestDistroFamily:
+    def test_debian(self, tmp_path):
+        path = write_release(tmp_path, 'ID=debian\nVERSION_ID="13"\n')
+        assert platforminfo.distro_family(path) == "apt"
+
+    def test_ubuntu(self, tmp_path):
+        path = write_release(tmp_path, 'ID=ubuntu\nVERSION_ID="24.04"\n')
+        assert platforminfo.distro_family(path) == "apt"
+
+    def test_fedora(self, tmp_path):
+        path = write_release(tmp_path, 'ID=fedora\nVERSION_ID="44"\n')
+        assert platforminfo.distro_family(path) == "dnf"
+
+    def test_arch(self, tmp_path):
+        path = write_release(tmp_path, "ID=arch\n")
+        assert platforminfo.distro_family(path) == "pacman"
+
+    def test_opensuse_tumbleweed(self, tmp_path):
+        path = write_release(tmp_path, 'ID=opensuse-tumbleweed\nID_LIKE="suse"\n')
+        assert platforminfo.distro_family(path) == "zypper"
+
+    def test_opensuse_leap(self, tmp_path):
+        path = write_release(tmp_path, 'ID=opensuse-leap\nVERSION_ID="15.6"\n')
+        assert platforminfo.distro_family(path) == "zypper"
+
+    def test_ubuntu_derivative(self, tmp_path):
+        path = write_release(tmp_path, 'ID=pop\nID_LIKE="ubuntu debian"\n')
+        assert platforminfo.distro_family(path) == "apt"
+
+    def test_almalinux(self, tmp_path):
+        path = write_release(
+            tmp_path, 'ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="9.5"\n'
+        )
+        assert platforminfo.distro_family(path) == "dnf"
+
+    def test_rocky(self, tmp_path):
+        path = write_release(
+            tmp_path, 'ID=rocky\nID_LIKE="rhel centos fedora"\nVERSION_ID="9"\n'
+        )
+        assert platforminfo.distro_family(path) == "dnf"
+
+    def test_manjaro(self, tmp_path):
+        path = write_release(tmp_path, 'ID=manjaro\nID_LIKE="arch"\n')
+        assert platforminfo.distro_family(path) == "pacman"
+
+    def test_linuxmint(self, tmp_path):
+        path = write_release(tmp_path, 'ID=linuxmint\nID_LIKE="ubuntu debian"\n')
+        assert platforminfo.distro_family(path) == "apt"
+
+    def test_unknown_distro(self, tmp_path):
+        path = write_release(tmp_path, "ID=haiku\n")
+        assert platforminfo.distro_family(path) == "unknown"
+
+    def test_missing_file(self, tmp_path):
+        assert platforminfo.distro_family(tmp_path / "nope") == "unknown"
+
+    def test_slackware(self, tmp_path):
+        path = write_release(tmp_path, 'ID=slackware\nNAME="Slackware"\n')
+        assert platforminfo.distro_family(path) == "unknown"
+
+    def test_gentoo(self, tmp_path):
+        path = write_release(tmp_path, 'ID=gentoo\nNAME="Gentoo"\n')
+        assert platforminfo.distro_family(path) == "unknown"
+
+
+class TestDistroVersionId:
+    def test_has_version(self, tmp_path):
+        path = write_release(tmp_path, 'ID=debian\nVERSION_ID="13"\n')
+        assert platforminfo.distro_version_id(path) == "13"
+
+    def test_dotted_version(self, tmp_path):
+        path = write_release(tmp_path, 'ID=ubuntu\nVERSION_ID="24.04"\n')
+        assert platforminfo.distro_version_id(path) == "24.04"
+
+    def test_rolling_no_version(self, tmp_path):
+        path = write_release(tmp_path, "ID=arch\n")
+        assert platforminfo.distro_version_id(path) == ""
+
+    def test_missing_file(self, tmp_path):
+        assert platforminfo.distro_version_id(tmp_path / "nope") == ""
