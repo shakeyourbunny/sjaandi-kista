@@ -9,13 +9,53 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import platform
 import shutil
 import tempfile
+import time
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_SETTLE_FS_TYPES = frozenset({"cifs", "smb", "smbfs", "fuse.mergerfs", "mergerfs"})
+_SETTLE_DELAY_DEFAULT = 2.0
+
+# Mount table: parsed once from /proc/mounts at import, cached for the
+# process lifetime. Maps resolved mountpoint string to filesystem type.
+# Sorted longest-first so the first prefix match is the deepest mount.
+_mount_table: list[tuple[str, str]] = []
+
+if platform.system() == "Linux":
+    try:
+        _raw: dict[str, str] = {}
+        with open("/proc/mounts", encoding="utf-8") as _f:
+            for _line in _f:
+                _parts = _line.split()
+                if len(_parts) >= 3:
+                    _raw[_parts[1]] = _parts[2]
+        _mount_table = sorted(_raw.items(), key=lambda kv: len(kv[0]), reverse=True)
+    except OSError:
+        pass
+
+# Per-path cache: resolved path -> needs_settle bool. Avoids repeated
+# linear scans of the mount table for the same directory.
+_settle_cache: dict[str, bool] = {}
+
+
+def _needs_settle(path: Path) -> bool:
+    """True when path lives on a filesystem where writes may be delayed."""
+    resolved = str(path.resolve())
+    if resolved in _settle_cache:
+        return _settle_cache[resolved]
+    result = False
+    for mountpoint, fstype in _mount_table:
+        if resolved.startswith(mountpoint):
+            result = fstype in _SETTLE_FS_TYPES
+            break
+    _settle_cache[resolved] = result
+    return result
 
 
 def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
@@ -46,6 +86,8 @@ def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
     finally:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
+    if _needs_settle(path):
+        time.sleep(_SETTLE_DELAY_DEFAULT)
 
 
 def stamp_http_mtime(path: str | Path, last_modified: str) -> datetime | None:
@@ -135,17 +177,27 @@ def available_name(path: str | Path) -> Path:
 
 
 def copy_preserving(src: str | Path, dst: str | Path) -> None:
-    """Copy with metadata; timestamp preservation is the point."""
+    """Copy with metadata; timestamp preservation is the point.
+
+    On CIFS or mergerfs targets, pauses after writing to let delayed
+    writes settle before the caller proceeds to verify or delete.
+    """
     src, dst = Path(src), Path(dst)
     if not src.is_file():
         raise FileNotFoundError(f"source is not a file: {src}")
     shutil.copy2(src, dst)
+    if _needs_settle(dst):
+        time.sleep(_SETTLE_DELAY_DEFAULT)
 
 
 def move_preserving(src: str | Path, dst: str | Path) -> None:
     """Move that survives filesystem boundaries and verifies the
     timestamp landed before the source is removed. Refuses to
-    overwrite an existing target."""
+    overwrite an existing target.
+
+    On CIFS or mergerfs targets, pauses after cross-device copy
+    before verifying size and mtime.
+    """
     src, dst = Path(src), Path(dst)
     if not src.is_file():
         raise FileNotFoundError(f"source is not a file: {src}")
@@ -158,9 +210,14 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
         if e.errno != errno.EXDEV:
             raise
     shutil.copy2(src, dst)
+    if _needs_settle(dst):
+        time.sleep(_SETTLE_DELAY_DEFAULT)
     if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
         dst.unlink()
         raise OSError(f"mtime not preserved copying {src} -> {dst}")
+    if dst.stat().st_size != src.stat().st_size:
+        dst.unlink()
+        raise OSError(f"size mismatch after copy: {src} -> {dst}")
     src.unlink()
 
 
