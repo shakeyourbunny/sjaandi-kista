@@ -63,7 +63,10 @@ def _strip_hazards(name: str) -> str:
     out = []
     for ch in name:
         cat = unicodedata.category(ch)
-        if cat in ("Cc", "Cf", "Cs", "Co", "Cn"):
+        if cat == "Cc":
+            out.append("_")               # keep word boundary
+            continue
+        if cat in ("Cf", "Cs", "Co", "Cn"):
             continue                      # invisible / dangerous -> drop
         if cat in ("Zs", "Zl", "Zp"):
             out.append(" ")               # any space-like -> plain space
@@ -107,6 +110,8 @@ def _dedevice(name: str) -> str:
     default that can change under us."""
     if name in _POSIX_RESERVED:
         return "_"
+    if name.startswith("."):
+        name = "_" + name[1:]
     head, dot, tail = name.partition(".")
     if head.upper() in _WIN_DEVICE:
         return f"{head}_{dot}{tail}"
@@ -115,7 +120,8 @@ def _dedevice(name: str) -> str:
 
 def _apply_charclass(name: str) -> str:
     stem, ext = _split_ext(name)
-    stem = _EXPLOIT_CHARS.sub("_", stem).replace(".", "_")
+    stem = _EXPLOIT_CHARS.sub("_", stem)
+    stem = re.sub(r"\.{2,}", "_", stem)
     return stem + ext
 
 
@@ -162,7 +168,7 @@ def windows_safe(name: str) -> str:
     name = _strip_hazards(name)
     name = re.sub(r'[<>:"/\\|?*]', "_", name)
     name = _apply_charclass(name)
-    name = _collapse(name).strip(" ").rstrip(".")
+    name = _collapse(name).strip(" ").rstrip(". ")
     name = _dedevice(name)
     return _truncate(name) or "_"
 
@@ -175,7 +181,7 @@ def sanitize_filename(name: str) -> str:
     from pathvalidate.handler import ReservedNameHandler
     name = _strip_hazards(name)
     name = _apply_charclass(name)
-    name = _collapse(name).strip(" ").rstrip(".")
+    name = _collapse(name).strip(" ").rstrip(". ")
     name = str(_pv(name, platform="universal", replacement_text="_",
                    max_len=_MAX_BYTES,
                    reserved_name_handler=ReservedNameHandler.as_is))
@@ -190,10 +196,8 @@ def sanitize_path_component(name: str) -> str:
     from pathvalidate import sanitize_filename as _pv
     from pathvalidate.handler import ReservedNameHandler
     basis = _collapse(_strip_hazards(name)).strip(" ").rstrip(". ")
-    if not basis:
-        # dot/space-only input (".", "..", "..." , NBSP-only): pure garbage /
-        # POSIX traversal tokens. Neutralize to "_" but keep them distinct.
-        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    if not basis or not basis.strip("_-. "):
+        digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         return f"_-{digest}"
     cleaned = _apply_charclass(basis)
     cleaned = str(_pv(cleaned, platform="universal", replacement_text="_",
@@ -201,9 +205,17 @@ def sanitize_path_component(name: str) -> str:
                       reserved_name_handler=ReservedNameHandler.as_is))
     cleaned = _dedevice(cleaned)
     if not cleaned.strip("_-. "):
-        raise ValueError("path component sanitized to empty")
-    if cleaned != basis:
-        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        return f"_-{digest}"
+    if cleaned != unicodedata.normalize("NFC", name):
+        digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         stem, ext = _split_ext(cleaned)
-        cleaned = f"{stem}-{digest}{ext}"
+        # Truncate the stem first to leave room for the hash suffix,
+        # so _truncate never chops the collision guard.
+        suffix = f"-{digest}"
+        max_stem = _MAX_BYTES - len(ext.encode("utf-8")) - len(suffix.encode("utf-8"))
+        while len(stem.encode("utf-8")) > max_stem and stem:
+            stem = stem[:-1]
+        stem = stem.rstrip(". ")
+        cleaned = f"{stem}{suffix}{ext}"
     return _truncate(cleaned) or "_"

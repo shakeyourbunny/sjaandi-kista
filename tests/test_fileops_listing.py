@@ -55,3 +55,13 @@ class TestStampHttpMtime:
         target = tmp_path / "f"
         target.write_bytes(b"x")
         assert fileops.stamp_http_mtime(target, "not a date") is None
+
+    def test_naive_datetime_treated_as_utc(self, tmp_path):
+        from datetime import UTC
+        target = tmp_path / "f"
+        target.write_bytes(b"x")
+        # -0000 produces a naive datetime from parsedate_to_datetime
+        result = fileops.stamp_http_mtime(target, "Wed, 21 Oct 2015 07:28:00 -0000")
+        assert result is not None
+        assert result.tzinfo is not None
+        assert result.tzinfo == UTC

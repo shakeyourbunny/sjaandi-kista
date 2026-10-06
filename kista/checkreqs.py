@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import tomllib
@@ -62,18 +63,24 @@ def load_manifest(path: str | Path) -> list[Dependency]:
     return deps
 
 
+logger = logging.getLogger(__name__)
+
+
 def _is_available(dep: Dependency) -> bool:
     if dep.binary:
         return shutil.which(dep.binary) is not None
     if dep.check_command:
+        # check_command is a shell line from the project's own manifest
+        # (pipes and redirects are part of the contract), not user input.
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B602
                 dep.check_command, shell=True, capture_output=True,
                 timeout=10, check=False,
             )
             return result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False
+    logger.debug("dependency %r has no binary or check_command, assuming available", dep.name)
     return True
 
 

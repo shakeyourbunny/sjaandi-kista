@@ -16,6 +16,6 @@ def human_size(size_bytes: int) -> str:
     value = float(size_bytes)
     for unit in _UNITS:
         value /= 1024.0
-        if value < 1024.0 or unit == _UNITS[-1]:
+        if value < 1023.95 or unit == _UNITS[-1]:
             return f"{value:.1f} {unit}"
     raise AssertionError("unreachable")

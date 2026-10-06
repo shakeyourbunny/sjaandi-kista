@@ -10,6 +10,7 @@ import errno
 import logging
 import os
 import platform
+import re
 import shutil
 import tempfile
 import time
@@ -27,6 +28,11 @@ _SETTLE_DELAY_DEFAULT = 2.0
 # Sorted longest-first so the first prefix match is the deepest mount.
 _mount_table: list[tuple[str, str]] = []
 
+def _unescape_mount(s: str) -> str:
+    """Unescape octal sequences in /proc/mounts (spaces as \\040 etc.)."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), s)
+
+
 if platform.system() == "Linux":
     try:
         _raw: dict[str, str] = {}
@@ -34,14 +40,13 @@ if platform.system() == "Linux":
             for _line in _f:
                 _parts = _line.split()
                 if len(_parts) >= 3:
-                    _raw[_parts[1]] = _parts[2]
+                    _raw[_unescape_mount(_parts[1])] = _parts[2]
         _mount_table = sorted(_raw.items(), key=lambda kv: len(kv[0]), reverse=True)
     except OSError:
         pass
 
-# Per-path cache: resolved path -> needs_settle bool. Avoids repeated
-# linear scans of the mount table for the same directory.
 _settle_cache: dict[str, bool] = {}
+_SETTLE_CACHE_MAX = 256
 
 
 def _needs_settle(path: Path) -> bool:
@@ -51,40 +56,48 @@ def _needs_settle(path: Path) -> bool:
         return _settle_cache[resolved]
     result = False
     for mountpoint, fstype in _mount_table:
-        if resolved.startswith(mountpoint):
+        if resolved == mountpoint or resolved.startswith(mountpoint.rstrip("/") + "/"):
             result = fstype in _SETTLE_FS_TYPES
             break
+    if len(_settle_cache) >= _SETTLE_CACHE_MAX:
+        _settle_cache.clear()
     _settle_cache[resolved] = result
     return result
 
 
 def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
-    """Write via temp file in the same directory plus rename; a crash
-    mid-write never leaves a truncated file at the target path."""
+    """Write via temp file in the same directory plus rename. On mergerfs
+    the EXDEV fallback is not atomic and not crash-safe."""
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError(f"data must be bytes, got {type(data).__name__}")
     path = Path(path)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    exdev_copy_failed = False
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        # mkstemp creates 0600; the caller decides the real mode
         os.chmod(tmp_name, mode)
         try:
             os.replace(tmp_name, path)
         except OSError as e:
-            # Layered filesystems (mergerfs) can raise EXDEV for a
-            # rename inside one directory; copy+delete sidesteps it.
             if e.errno != errno.EXDEV:
                 raise
-            if path.exists():
-                path.unlink()
-            shutil.copy2(tmp_name, path)
+            # mergerfs can raise EXDEV inside one directory.
+            if os.path.lexists(path):
+                os.unlink(path)
+            try:
+                shutil.copy2(tmp_name, path)
+            except BaseException:
+                exdev_copy_failed = True
+                if os.path.lexists(path):
+                    os.unlink(path)
+                logger.error("EXDEV copy failed; payload kept at %s", tmp_name)
+                raise
             os.unlink(tmp_name)
     finally:
-        if os.path.exists(tmp_name):
+        if not exdev_copy_failed and os.path.exists(tmp_name):
             os.unlink(tmp_name)
     if _needs_settle(path):
         time.sleep(_SETTLE_DELAY_DEFAULT)
@@ -103,6 +116,9 @@ def stamp_http_mtime(path: str | Path, last_modified: str) -> datetime | None:
     except (ValueError, TypeError) as e:
         logger.warning("Unparseable Last-Modified %r for %s: %s", last_modified, path, e)
         return None
+    # RFC 2616: all HTTP dates are UTC; non-compliant servers may omit tz
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
     seconds = stamp.timestamp()
     os.utime(path, (seconds, seconds))
     return stamp
@@ -144,20 +160,27 @@ def prune_candidates(
     """
     if max_age_days is None and keep_newest is None:
         raise ValueError("at least one of max_age_days or keep_newest is required")
+    if max_age_days is not None and max_age_days < 0:
+        raise ValueError(f"max_age_days must not be negative: {max_age_days}")
+    if keep_newest is not None and keep_newest < 0:
+        raise ValueError(f"keep_newest must not be negative: {keep_newest}")
     directory = Path(directory)
     if not directory.is_dir():
         return []
 
-    files = [p for p in directory.glob(pattern) if p.is_file()]
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    entries = []
+    for p in directory.glob(pattern):
+        if p.is_file():
+            entries.append((p, p.stat().st_mtime))
+    entries.sort(key=lambda e: e[1], reverse=True)
 
     cutoff = None
     if max_age_days is not None:
         cutoff = datetime.now(UTC).timestamp() - max_age_days * 86400
 
     selected = []
-    for index, path in enumerate(files):
-        too_old = cutoff is not None and path.stat().st_mtime < cutoff
+    for index, (path, mtime) in enumerate(entries):
+        too_old = cutoff is not None and mtime < cutoff
         overflow = keep_newest is not None and index >= keep_newest
         if too_old or overflow:
             selected.append(path)
@@ -209,7 +232,12 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
     except OSError as e:
         if e.errno != errno.EXDEV:
             raise
-    shutil.copy2(src, dst)
+    try:
+        shutil.copy2(src, dst)
+    except BaseException:
+        if dst.exists():
+            dst.unlink()
+        raise
     if _needs_settle(dst):
         time.sleep(_SETTLE_DELAY_DEFAULT)
     if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
@@ -221,9 +249,19 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
     src.unlink()
 
 
-def utc_now() -> datetime:
-    """The house never uses naive local time."""
-    return datetime.now(UTC)
+from kista.dt import utc_now  # re-export for backwards compatibility
+
+__all__ = [
+    "available_name",
+    "copy_preserving",
+    "list_files",
+    "move_preserving",
+    "prune_candidates",
+    "remove_tree",
+    "stamp_http_mtime",
+    "utc_now",
+    "write_atomic",
+]
 
 
 def _fsync_dir(dirpath: Path) -> None:
@@ -257,8 +295,9 @@ def _assert_single_fs(directory: Path, root_dev: int) -> None:
 
 
 def _rmtree_single_fs(directory: Path, root_dev: int) -> None:
-    """Re-checks st_dev per directory as defence against a mount appearing
-    after the pre-scan."""
+    """Re-checks st_dev per directory against mounts appearing after pre-scan.
+    Residual TOCTOU between DirEntry.is_dir() and recursion; closing it
+    needs O_NOFOLLOW+fstat which os.scandir lacks before 3.12."""
     with os.scandir(directory) as it:
         for e in it:
             if e.is_symlink():
@@ -273,7 +312,7 @@ def _rmtree_single_fs(directory: Path, root_dev: int) -> None:
 
 
 def remove_tree(target, within, *, follow_mounts: bool = False,
-                missing_ok: bool = False, dry_run: bool = False):
+                missing_ok: bool = False, dry_run: bool = False) -> list[Path]:
     """Safer shutil.rmtree: deletes target only if it resolves to a real
     directory strictly inside `within`, refusing symlinked targets, escapes
     via .. or symlink, target == within, filesystem roots and mount points.

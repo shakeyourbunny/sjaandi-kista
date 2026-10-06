@@ -3,19 +3,23 @@
 #
 
 [project]
-name = "kista"
-version = "0.8.0"
+name = "sjaandi-kista"
+dynamic = ["version"]
 description = "House toolchest: shared modules for the Projects family"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 dependencies = [
     "requests",
     "pathvalidate",
+    "brotli",
 ]
 
 [project.optional-dependencies]
 cache = [
     "requests-cache",
+]
+slugify = [
+    "unidecode",
 ]
 dev = [
     "pytest",
@@ -30,6 +34,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["kista"]
+
+[tool.setuptools.dynamic]
+version = {attr = "kista.__version__"}
 
 [tool.setuptools.package-data]
 kista = ["data/*.txt"]

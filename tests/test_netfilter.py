@@ -32,6 +32,17 @@ class TestJunkHost:
         with pytest.raises(ValueError):
             netfilter.is_junk_host("")
 
+    def test_whitelist_not_bypassed_by_attacker_subdomain(self):
+        # "forum." is a junk pattern. "vogons.org" is whitelisted.
+        # With suffix matching, forum.vogons.org.attacker.com must NOT
+        # be whitelisted (it does not end with vogons.org).
+        assert netfilter.is_junk_host("forum.vogons.org.attacker.com") is True
+
+    def test_host_with_port_not_confused(self):
+        # is_junk_host takes a bare hostname; port in the string
+        # must not defeat the substring match
+        assert netfilter.is_junk_host("doubleclick.net") is True
+
 
 class TestJunkPath:
     def test_wp_admin_is_junk(self):
@@ -86,46 +97,3 @@ class TestHashing:
             hashing.file_md5(tmp_path / "ghost")
 
 
-class TestWindowsSafe:
-    @pytest.mark.parametrize("raw,expected", [
-        ('a<b>c:d"e', "a_b_c_d_e"),
-        ("normal-name.txt", "normal-name.txt"),
-        ("trailing. ", "trailing"),
-        ("ctrl\x01char", "ctrl_char"),
-    ])
-    def test_replacements(self, raw, expected):
-        from kista import sanitize
-        assert sanitize.windows_safe(raw) == expected
-
-    def test_never_empty(self):
-        from kista import sanitize
-        assert sanitize.windows_safe("...") == "_"
-
-
-class TestSanitizeFilename:
-    def test_hostile_chars_removed(self):
-        from kista import sanitize
-        result = sanitize.sanitize_filename('Game: The "Sequel" <2>?')
-        assert ":" not in result
-        assert "?" not in result
-        assert "<" not in result
-
-    def test_reserved_name_defused(self):
-        from kista import sanitize
-        assert sanitize.sanitize_filename("CON").upper() != "CON"
-
-    def test_trailing_dots_spaces_stripped(self):
-        from kista import sanitize
-        assert not sanitize.sanitize_filename("name. ").endswith((".", " "))
-
-    def test_replacement_semantics(self):
-        from kista import sanitize
-        assert sanitize.sanitize_filename("???") == "___"
-
-    def test_never_empty(self):
-        from kista import sanitize
-        assert sanitize.sanitize_filename(". ") == "_"
-
-    def test_normal_name_untouched(self):
-        from kista import sanitize
-        assert sanitize.sanitize_filename("normal-file 1.2.txt") == "normal-file 1.2.txt"

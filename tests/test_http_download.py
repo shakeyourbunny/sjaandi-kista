@@ -115,6 +115,11 @@ class TestDelay:
         with pytest.raises(ValueError):
             http.parse_delay("soon")
 
+    @pytest.mark.parametrize("spec", ["nan", "inf", "-inf", "0-inf"])
+    def test_nan_inf_rejected(self, spec):
+        with pytest.raises(ValueError):
+            http.parse_delay(spec)
+
     def test_sleep_jitter_within_range(self, monkeypatch):
         slept = []
         monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))

@@ -32,7 +32,8 @@ ARCH_PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 _MACOS_RE = re.compile(
-    r"(?:macos|osx|darwin|mac[-_.]|apple|\.dmg$|\.sit$|\.hqx$)", re.IGNORECASE
+    r"(?:macos|osx|(?<![a-z])darwin(?![a-z])|mac[-_.]|(?<![a-z])apple(?![a-z])|\.dmg$|\.sit$|\.hqx$)",
+    re.IGNORECASE,
 )
 
 

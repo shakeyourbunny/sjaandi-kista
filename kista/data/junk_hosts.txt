@@ -9,7 +9,7 @@ googletagmanager.com
 googletagservices.com
 doubleclick.net
 googlevideo.com
-gstatic.com/recaptcha
+recaptcha.net
 adservice.google.
 
 # ── Adobe / Omniture ──

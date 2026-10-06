@@ -43,6 +43,14 @@ class TestPruneCandidates:
         with pytest.raises(ValueError):
             fileops.prune_candidates(tmp_path)
 
+    def test_negative_max_age_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            fileops.prune_candidates(tmp_path, max_age_days=-1)
+
+    def test_negative_keep_newest_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            fileops.prune_candidates(tmp_path, keep_newest=-1)
+
     def test_missing_directory_is_empty(self, tmp_path):
         assert fileops.prune_candidates(tmp_path / "ghost", keep_newest=1) == []
 

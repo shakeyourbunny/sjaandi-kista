@@ -9,12 +9,12 @@ from kista import sanitize
 
 class TestSlugify:
     @pytest.mark.parametrize("raw,expected", [
-        ("Hello World", "hello-world"),
-        ("Träume & Schäume!", "träume-schäume"),
-        ("  spaced  out  ", "spaced-out"),
-        ("under_scores_too", "under-scores-too"),
-        ("multi---dash", "multi-dash"),
-        ("Already-Fine", "already-fine"),
+        ("Hello World", "hello_world"),
+        ("Träume & Schäume!", "traume_schaume"),
+        ("  spaced  out  ", "spaced_out"),
+        ("under_scores_too", "under_scores_too"),
+        ("multi---dash", "multi_dash"),
+        ("Already-Fine", "already_fine"),
     ])
     def test_slugs(self, raw, expected):
         assert sanitize.slugify(raw) == expected
@@ -45,9 +45,11 @@ class TestPathComponent:
     def test_case_preserved(self):
         assert sanitize.sanitize_path_component("UserName") == "UserName"
 
-    def test_pure_dot_name_rejected(self):
-        with pytest.raises(ValueError):
-            sanitize.sanitize_path_component("..")
+    def test_pure_dot_name_neutralized(self):
+        result = sanitize.sanitize_path_component("..")
+        assert result != ".."
+        assert not result.startswith(".")
+        assert "_" in result
 
     def test_windows_reserved_names_defused(self):
         for name in ("CON", "con", "NUL", "COM1", "lpt9"):
@@ -60,9 +62,90 @@ class TestPathComponent:
         with pytest.raises(ValueError):
             sanitize.sanitize_path_component("")
 
-    def test_only_hostile_chars_rejected(self):
-        with pytest.raises(ValueError):
-            sanitize.sanitize_path_component("///")
+    def test_only_hostile_chars_get_hash_placeholder(self):
+        result = sanitize.sanitize_path_component("///")
+        assert result.startswith("_-")
+        assert len(result) == 10
+
+    def test_nfkc_identical_inputs_get_different_hashes(self):
+        # fi ligature normalizes to "fi" under NFKC
+        a = sanitize.sanitize_path_component("ﬁle")
+        b = sanitize.sanitize_path_component("file")
+        assert a != b
+
+    def test_zero_width_joiner_distinguished(self):
+        a = sanitize.sanitize_path_component("adm‍in")
+        b = sanitize.sanitize_path_component("admin")
+        assert a != b
+
+    def test_hash_stable_on_reapply(self):
+        result = sanitize.sanitize_path_component("foo:bar")
+        assert sanitize.sanitize_path_component(result) == result
+
+    def test_control_char_only_gets_hash_placeholder(self):
+        result = sanitize.sanitize_path_component("\t")
+        assert result.startswith("_-")
+        assert len(result) == 10
+
+
+class TestWindowsSafe:
+    @pytest.mark.parametrize("raw,expected", [
+        ('a<b>c:d"e', "a_b_c_d_e"),
+        ("normal-name.txt", "normal-name.txt"),
+        ("trailing. ", "trailing"),
+        ("ctrl\x01char", "ctrl_char"),
+    ])
+    def test_replacements(self, raw, expected):
+        assert sanitize.windows_safe(raw) == expected
+
+    def test_dotfiles_defused(self):
+        assert not sanitize.windows_safe(".htaccess").startswith(".")
+        assert not sanitize.windows_safe(".git").startswith(".")
+
+    def test_no_trailing_spaces(self):
+        result = sanitize.windows_safe("foo ..")
+        assert not result.endswith(" ")
+
+    @pytest.mark.parametrize("raw", [
+        "hello...", "name. ", "test . .", "dots..spaces  ..",
+    ])
+    def test_no_trailing_dots_or_spaces(self, raw):
+        result = sanitize.windows_safe(raw)
+        assert not result.endswith(".")
+        assert not result.endswith(" ")
+
+    def test_never_empty(self):
+        assert sanitize.windows_safe("...") == "_"
+
+
+class TestSanitizeFilename:
+    def test_hostile_chars_removed(self):
+        result = sanitize.sanitize_filename('Game: The "Sequel" <2>?')
+        assert ":" not in result
+        assert "?" not in result
+        assert "<" not in result
+
+    def test_reserved_name_defused(self):
+        assert sanitize.sanitize_filename("CON").upper() != "CON"
+
+    def test_dotfiles_defused(self):
+        assert not sanitize.sanitize_filename(".htaccess").startswith(".")
+
+    def test_trailing_dots_spaces_stripped(self):
+        assert not sanitize.sanitize_filename("name. ").endswith((".", " "))
+
+    def test_no_trailing_spaces(self):
+        result = sanitize.sanitize_filename("foo ..")
+        assert not result.endswith(" ")
+
+    def test_replacement_semantics(self):
+        assert sanitize.sanitize_filename("???") == "_"
+
+    def test_never_empty(self):
+        assert sanitize.sanitize_filename(". ") == "_"
+
+    def test_normal_name_untouched(self):
+        assert sanitize.sanitize_filename("normal-file 1.2.txt") == "normal-file 1.2.txt"
 
 
 class TestHumanize:
@@ -106,6 +189,16 @@ class TestDedevice:
     @pytest.mark.parametrize("raw", [".", ".."])
     def test_posix_reserved_collapse_to_underscore(self, raw):
         assert sanitize._dedevice(raw) == "_"
+
+    @pytest.mark.parametrize("raw,expected", [
+        (".htaccess", "_htaccess"),
+        (".git", "_git"),
+        (".env", "_env"),
+        (".gitignore", "_gitignore"),
+        (".svn", "_svn"),
+    ])
+    def test_dotfiles_defused(self, raw, expected):
+        assert sanitize._dedevice(raw) == expected
 
     @pytest.mark.parametrize("raw", ["normal.txt", "CONTENT", "COM", "COM10", "readme"])
     def test_ordinary_names_untouched(self, raw):

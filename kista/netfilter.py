@@ -33,12 +33,17 @@ JUNK_HOST_WHITELIST = tuple(
 )
 
 
+def _host_matches(host: str, entry: str) -> bool:
+    """Suffix match: host ends with entry, preceded by a dot or exact."""
+    return host == entry or host.endswith("." + entry)
+
+
 def is_junk_host(host: str) -> bool:
     """True if the hostname matches a junk pattern and no whitelist entry."""
     if not host or not host.strip():
         raise ValueError("host must not be empty")
-    host = host.lower()
-    if any(entry in host for entry in JUNK_HOST_WHITELIST):
+    host = host.lower().rstrip(".")
+    if any(_host_matches(host, entry) for entry in JUNK_HOST_WHITELIST):
         return False
     return any(pattern in host for pattern in JUNK_HOST_PATTERNS)
 
@@ -56,6 +61,6 @@ def is_junk_url(url: str) -> bool:
     if not url or not url.strip():
         raise ValueError("url must not be empty")
     parsed = urlparse(url)
-    if parsed.netloc and is_junk_host(parsed.netloc):
+    if parsed.hostname and is_junk_host(parsed.hostname):
         return True
     return is_junk_path(parsed.path)

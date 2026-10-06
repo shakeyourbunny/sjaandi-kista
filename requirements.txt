@@ -1,4 +1,5 @@
 requests
 pathvalidate
+brotli
 # optional, cache extra
 requests-cache

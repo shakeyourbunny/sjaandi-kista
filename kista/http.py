@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.cookiejar
 import importlib.util
 import logging
+import math
 import os
 import random
 import tempfile
@@ -28,11 +29,12 @@ logger = logging.getLogger(__name__)
 
 # One pinned browser identity. Bumping this constant moves the UA
 # string and Sec-Ch-Ua together; nothing else may hardcode a version.
-CHROME_VERSION = "150"
+CHROME_VERSION = "152"
 
-# GREASE brand as captured from a real Chrome 150 on Linux
-# (DevTools reference capture, 2026-08-01).
-_SEC_CH_UA = f'"Not:A-Brand";v="8", "Chromium";v="{CHROME_VERSION}"'
+# GREASE brand for Chromium 152 (captured from Vivaldi 8.2, Linux,
+# 2026-10-04). The brand string and v= change with CHROME_VERSION -
+# update both together.
+_SEC_CH_UA = f'"Not?A_Brand";v="24", "Chromium";v="{CHROME_VERSION}"'
 
 _UA_BROWSER = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -69,15 +71,12 @@ def _module_available(name: str) -> bool:
 def supported_encodings() -> str:
     """Accept-Encoding value listing only what the runtime can decode.
 
-    Advertising an encoding and choking on the response is worse than
-    omitting it - br and zstd are included only if their decoders are
-    importable.
+    br is included only if a decoder is importable.
+    zstd omitted: urllib3 needs compression.zstd, not zstandard.
     """
     encodings = ["gzip", "deflate"]
     if _module_available("brotli") or _module_available("brotlicffi"):
         encodings.append("br")
-    if _module_available("zstandard"):
-        encodings.append("zstd")
     return ", ".join(encodings)
 
 
@@ -98,13 +97,30 @@ def _registrable_domain(netloc: str) -> str:
     return ".".join(netloc.rsplit(".", 2)[-2:])
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443, "ftp": 21}
+
+
+def _effective_port(parsed) -> int | None:
+    try:
+        if parsed.port is not None:
+            return parsed.port
+    except ValueError:
+        return None
+    return _DEFAULT_PORTS.get(parsed.scheme)
+
+
 def _sec_fetch_site(url: str, referer: str | None) -> str:
     if not referer:
         return "none"
     target, source = urlparse(url), urlparse(referer)
-    if target.netloc == source.netloc:
+    t_host = target.hostname or ""
+    s_host = source.hostname or ""
+    if (target.scheme == source.scheme
+            and t_host == s_host
+            and _effective_port(target) == _effective_port(source)):
         return "same-origin"
-    if _registrable_domain(target.netloc) == _registrable_domain(source.netloc):
+    if (target.scheme == source.scheme
+            and _registrable_domain(t_host) == _registrable_domain(s_host)):
         return "same-site"
     return "cross-site"
 
@@ -306,31 +322,33 @@ def download(
         raise FileExistsError(f"target already exists: {dest}")
 
     response = session.get(url, headers=headers, timeout=timeout, stream=True)
-    size = 0
-    total = None
-    length = response.headers.get("Content-Length")
-    if length is not None:
-        try:
-            total = int(length)
-        except ValueError:
-            pass
-    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
     try:
         response.raise_for_status()
-        with os.fdopen(fd, "wb") as f:
-            for chunk in response.iter_content(chunk_size):
-                f.write(chunk)
-                size += len(chunk)
-                if on_progress:
-                    on_progress(size, total)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp_name, 0o644)
-        os.replace(tmp_name, dest)
+        size = 0
+        total = None
+        length = response.headers.get("Content-Length")
+        if length is not None:
+            try:
+                total = int(length)
+            except ValueError:
+                pass
+        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                for chunk in response.iter_content(chunk_size):
+                    f.write(chunk)
+                    size += len(chunk)
+                    if on_progress:
+                        on_progress(size, total)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_name, 0o644)
+            os.replace(tmp_name, dest)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
     finally:
         response.close()
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
 
     last_modified = fileops.stamp_http_mtime(dest, response.headers.get("Last-Modified", ""))
     return DownloadResult(path=dest, size_bytes=size, last_modified=last_modified)
@@ -388,6 +406,8 @@ def parse_delay(spec: str) -> tuple[float, float]:
             low = high = float(spec)
     except ValueError:
         raise ValueError(f"invalid delay spec: {spec!r}") from None
+    if not (math.isfinite(low) and math.isfinite(high)):
+        raise ValueError(f"delay must be finite: {spec!r}")
     if low < 0 or high < 0:
         raise ValueError(f"delay must not be negative: {spec!r}")
     if high < low:

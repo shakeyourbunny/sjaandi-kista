@@ -74,6 +74,8 @@ class TestIsMacos:
         "app-linux-x86_64.AppImage",
         "app-windows.exe",
         "machine-learning.tar.gz",
+        "Darwinia-linux.tar.gz",
+        "pineapple-jam.zip",
     ])
     def test_non_macos(self, filename):
         assert is_macos(filename) is False

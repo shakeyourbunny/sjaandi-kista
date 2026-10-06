@@ -55,3 +55,22 @@ class TestCleanScrapedUrl:
     def test_empty_rejected(self):
         with pytest.raises(ValueError):
             urls.clean_scraped_url("   ")
+
+    @pytest.mark.parametrize("url", [
+        "javascript:alert(1)",
+        "data:text/html,<h1>hi</h1>",
+        "vbscript:MsgBox",
+        "file:///etc/passwd",
+        "blob:https://x/1",
+    ])
+    def test_disallowed_schemes_rejected(self, url):
+        with pytest.raises(ValueError, match="scheme not allowed"):
+            urls.clean_scraped_url(url)
+
+    def test_encoded_scheme_does_not_decode_path(self):
+        result = urls.clean_scraped_url("http%3a//example.com/path%3amore")
+        assert result == "http://example.com/path%3amore"
+
+    def test_file_base_does_not_leak(self):
+        with pytest.raises(ValueError, match="disallowed scheme"):
+            urls.clean_scraped_url("passwd", base="file:///etc/")

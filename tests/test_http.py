@@ -2,6 +2,8 @@
 # License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
 #
 
+from typing import ClassVar
+
 import pytest
 import requests
 
@@ -79,6 +81,61 @@ class TestBrowserProfile:
         )
         assert headers["Sec-Fetch-Site"] == "cross-site"
 
+    def test_sec_fetch_site_same_origin_default_port(self):
+        headers = http.browser_profile().headers_for(
+            "https://example.com:443/b", referer="https://example.com/a"
+        )
+        assert headers["Sec-Fetch-Site"] == "same-origin"
+
+    def test_sec_fetch_site_different_port_is_same_site(self):
+        headers = http.browser_profile().headers_for(
+            "https://example.com:8443/b", referer="https://example.com/a"
+        )
+        assert headers["Sec-Fetch-Site"] == "same-site"
+
+    def test_sec_fetch_site_scheme_mismatch_is_cross_site(self):
+        headers = http.browser_profile().headers_for(
+            "https://example.com/", referer="http://example.com/"
+        )
+        assert headers["Sec-Fetch-Site"] == "cross-site"
+
+
+class TestReferenceCapture:
+    # Chrome 152 on Linux opening https://myip.ch/, as captured 2026-10-04.
+    # Cache-Control/Pragma no-cache from DevTools "Disable cache" removed:
+    # not normal browser behavior, sabotages requests-cache.
+    CAPTURE: ClassVar[dict[str, str]] = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+                  "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+        "Sec-Ch-Ua": '"Not?A_Brand";v="24", "Chromium";v="152"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Linux"',
+    }
+
+    def test_a_document_request_matches_the_capture(self):
+        headers = requests.structures.CaseInsensitiveDict(
+            http.browser_profile().headers_for("https://myip.ch/"))
+        assert headers.pop("Accept-Encoding") == http.supported_encodings()
+        assert dict(headers) == requests.structures.CaseInsensitiveDict(self.CAPTURE)
+
+    def test_no_cache_headers_absent(self):
+        headers = http.browser_profile().headers_for("https://example.com/")
+        assert "Cache-Control" not in headers
+        assert "Pragma" not in headers
+
+    def test_brotli_advertised_zstd_not(self):
+        enc = http.supported_encodings()
+        assert "br" in enc
+        assert "zstd" not in enc
+
 
 class TestToolProfile:
     def test_ua_with_contact(self):
@@ -118,9 +175,9 @@ class TestEncodings:
         assert "zstd" not in encs
         assert "gzip" in encs
 
-    def test_zstd_advertised_when_available(self, monkeypatch):
+    def test_zstd_never_advertised(self, monkeypatch):
         monkeypatch.setattr(http, "_module_available", lambda name: True)
-        assert "zstd" in http.supported_encodings()
+        assert "zstd" not in http.supported_encodings()
 
     def test_profiles_use_supported_encodings(self):
         headers = http.browser_profile().headers_for("https://example.com/")
@@ -193,6 +250,20 @@ class TestCachedSession:
             expire_after=60, cache_dir=tmp_path,
         )
         assert (tmp_path / "http-cache.sqlite").is_file()
+
+    def test_browser_profile_does_not_poison_cache(self, tmp_path):
+        session = http.cached_session_for(
+            http.browser_profile(), "browser-test",
+            expire_after=300, cache_dir=tmp_path,
+        )
+        adapter = _CannedAdapter()
+        session.mount("http://", adapter)
+
+        session.get("http://cache.test/page", timeout=5)
+        second = session.get("http://cache.test/page", timeout=5)
+
+        assert adapter.calls == 1
+        assert getattr(second, "from_cache", False)
 
     def test_second_get_served_from_cache(self, tmp_path):
         session = http.cached_session_for(
