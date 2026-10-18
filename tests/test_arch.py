@@ -11,7 +11,7 @@ class TestDetectArch:
     @pytest.mark.parametrize("filename, expected", [
         ("FreeTube-0.25.1-linux-amd64.AppImage", "x86_64"),
         ("86Box-Linux-x86_64-b8200.AppImage", "x86_64"),
-        ("luducat-0.8.4c-x86_64-anylinux.AppImage", "x86_64"),
+        ("myapp-0.8.4c-x86_64-anylinux.AppImage", "x86_64"),
         ("Something-x86-64.AppImage", "x86_64"),
         ("app-x64.AppImage", "x86_64"),
     ])

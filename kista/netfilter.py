@@ -1,9 +1,7 @@
 # This file is part of the kista Project.
 # License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
 #
-# Junk lists and matching semantics from mget (same author, same
-# license); crash-reporting and product-analytics hosts merged in
-# from luducat's network_manager blocklist.
+# Junk host and path lists with crash-reporting and analytics hosts added.
 
 from __future__ import annotations
 

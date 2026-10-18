@@ -17,7 +17,7 @@ class TestJunkHost:
     def test_normal_host_is_not_junk(self):
         assert netfilter.is_junk_host("example.com") is False
 
-    def test_luducat_merge_entries_present(self):
+    def test_crash_reporting_and_analytics_entries_present(self):
         assert netfilter.is_junk_host("api.rollbar.com") is True
         assert netfilter.is_junk_host("static.cloudflareinsights.com") is True
 

@@ -1,3 +1,6 @@
+# This file is part of the kista Project.
+# License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
+#
 # mget — junk host whitelist (bypass junk host matching)
 # One pattern per line. Lines starting with # are comments. Blank lines ok.
 # If a URL's netloc matches a whitelist entry, the junk host check is skipped.

@@ -1,3 +1,6 @@
+# This file is part of the kista Project.
+# License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
+#
 # mget — junk host patterns (substring match on lowercased hostname)
 # One pattern per line. Lines starting with # are comments. Blank lines ok.
 
@@ -412,7 +415,7 @@ uqload.com
 doodstream.com
 filemoon.sx
 
-# ── Crash / error reporting (merged from luducat network_manager) ──
+# ── Crash / error reporting ──
 rollbar.com
 raygun.com
 raygun.io
@@ -428,7 +431,7 @@ trackjs.com
 glitchtip.com
 sentry-cdn.com
 
-# ── Product analytics (merged from luducat network_manager) ──
+# ── Product analytics ──
 mxpnl.com
 cloudflare-analytics.com
 cloudflareinsights.com

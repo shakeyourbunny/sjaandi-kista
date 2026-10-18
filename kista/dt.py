@@ -8,5 +8,5 @@ from datetime import UTC, datetime
 
 
 def utc_now() -> datetime:
-    """Timezone-aware now; the house never uses naive local time."""
+    """Timezone-aware now; never use naive local time."""
     return datetime.now(UTC)

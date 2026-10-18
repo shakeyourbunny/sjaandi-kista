@@ -5,14 +5,39 @@
 [project]
 name = "sjaandi-kista"
 dynamic = ["version"]
-description = "House toolchest: shared modules for the Projects family"
+description = "Reusable Python modules for file operations, HTTP identity, path safety, and platform detection"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.txt"]
+readme = "README.md"
+authors = [
+    { name = "shakeyourbunny", email = "kista-project@trinity2k.net" },
+]
+keywords = ["filesystem", "http", "user-agent", "sanitize", "path-safety", "platform"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: System :: Filesystems",
+]
 dependencies = [
     "requests",
     "pathvalidate",
     "brotli",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shakeyourbunny/sjaandi-kista"
+Repository = "https://github.com/shakeyourbunny/sjaandi-kista"
+Issues = "https://github.com/shakeyourbunny/sjaandi-kista/issues"
+Changelog = "https://github.com/shakeyourbunny/sjaandi-kista/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 cache = [

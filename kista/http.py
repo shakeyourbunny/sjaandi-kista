@@ -92,8 +92,7 @@ def _guess_kind(url: str) -> str:
 
 
 def _registrable_domain(netloc: str) -> str:
-    # Last two labels as a cheap eTLD+1; good enough for the
-    # same-site decision on the sites the house actually fetches.
+    # Last two labels as a cheap eTLD+1; sufficient for same-site decisions.
     return ".".join(netloc.rsplit(".", 2)[-2:])
 
 
@@ -309,8 +308,8 @@ def download(
     on_progress: callable | None = None,
 ) -> DownloadResult:
     """Stream url to dest: temp file + atomic rename, mtime stamped
-    from Last-Modified per the house download rule. Refuses to
-    overwrite; a failed transfer leaves nothing behind.
+    from Last-Modified. Refuses to overwrite; a failed transfer leaves
+    nothing behind.
 
     on_progress(received_bytes, total_bytes_or_none) is called after
     each chunk when provided.

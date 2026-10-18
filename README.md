@@ -1,8 +1,12 @@
+<!-- This file is part of the kista Project.
+     License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net -->
+
 # kista
 
-House toolchest. Small, well-scoped Python modules shared across the
-Projects family, so the same user agent handling, sanitizing and file
-routines stop getting rewritten per project.
+Reusable Python modules for file operations, HTTP identity, path
+safety, and platform detection. Small, well-scoped building blocks
+so the same user agent handling, sanitizing and file routines stop
+getting rewritten per project.
 
 Kista is Icelandic for chest - verkfaerakista is the toolchest.
 
@@ -10,7 +14,9 @@ Kista is Icelandic for chest - verkfaerakista is the toolchest.
 
 - `kista.http` - HTTP request identity: consistent header profiles
   (an honest tool profile and a complete browser ensemble), never
-  random user agents.
+  random user agents. The browser profile exists so automated
+  downloads can reach hosts that block generic user agents while
+  still identifying the actual client in the profile comment.
 - `kista.sanitize` - filename and path component sanitizing.
 - `kista.fileops` - atomic writes and timestamp-preserving copy/move.
 - `kista.paths` - containment guard (`resolve_within`) and archive
@@ -24,15 +30,31 @@ Kista is Icelandic for chest - verkfaerakista is the toolchest.
   mapping via ID_LIKE.
 - `kista.urls` - scraped-URL normalization.
 - `kista.dt` - timezone-aware UTC helpers.
+- `kista.arch` - AppImage architecture detection from filenames.
+- `kista.checkreqs` - system dependency checker from TOML manifests.
 
-## Usage
+## Install
 
-Install editable into a consumer project's venv:
+From PyPI:
 
-    .venv/bin/pip install -e ~/Projects/kista
+    pip install sjaandi-kista
 
-License: GPL-3.0-or-later.
+From source:
+
+    pip install .
+
+The import name is `kista`:
+
+```python
+from kista.sanitize import sanitize_filename
+from kista.http import browser_headers
+```
+
+## License
+
+GPL-3.0-or-later. See LICENSE for the full text and
+THIRD_PARTY_LICENSES.txt for dependencies. Product number SJ-PKG-0020.
 
 ---
-This project is developed with tooled assistance, but tested, reviewed and
-signed off by a human developer.
+kista has been written with the help of tooled assistance, but has been
+designed, reviewed and thoroughly tested and signed off by its developer.

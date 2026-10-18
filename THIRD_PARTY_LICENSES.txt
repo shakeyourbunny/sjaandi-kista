@@ -1,3 +1,6 @@
+# This file is part of the kista Project.
+# License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
+#
 Third-party libraries used by kista
 ===================================
 
@@ -5,14 +8,22 @@ requests
   License: Apache-2.0
   https://github.com/psf/requests
 
-requests-cache (optional, cache extra)
-  License: BSD-2-Clause
-  https://github.com/requests-cache/requests-cache
-  Backs kista.http.cached_session_for with an on-disk
-  response cache.
-
 pathvalidate
   License: MIT
   https://github.com/thombashi/pathvalidate
-  Used by kista.sanitize.sanitize_filename for cross-platform
-  filename validation.
+  Used by kista.sanitize for cross-platform filename validation.
+
+brotli
+  License: MIT
+  https://github.com/google/brotli
+  Brotli decompression for HTTP responses.
+
+requests-cache (optional, cache extra)
+  License: BSD-2-Clause
+  https://github.com/requests-cache/requests-cache
+  Backs kista.http.cached_session_for with an on-disk response cache.
+
+unidecode (optional, slugify extra)
+  License: GPL-2.0-or-later
+  https://github.com/avian2/unidecode
+  ASCII transliteration for kista.sanitize slug generation.

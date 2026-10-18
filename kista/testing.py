@@ -1,13 +1,13 @@
 # This file is part of the kista Project.
 # License: GPL-3.0-or-later. Contact: kista-project@trinity2k.net
 #
-# Corpus adapted from the dosbox-automation project's
-# test_traversal_contract.py (GPL-2.0-or-later, same household).
+# Corpus adapted from dosbox-automation
+# (https://github.com/dosbox-automation/dosbox-automation, GPL-2.0-or-later).
 
 """Hostile input corpora for test parametrization.
 
-Import these in any house project's tests instead of hand-rolling a
-subset: `@pytest.mark.parametrize("label,path", HOSTILE_URL_PATHS)`.
+Import these instead of hand-rolling a subset:
+`@pytest.mark.parametrize("label,path", HOSTILE_URL_PATHS)`.
 Each corpus is a list of (label, value) pairs.
 """
 
