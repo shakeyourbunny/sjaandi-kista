@@ -14,9 +14,9 @@ Kista is Icelandic for chest - verkfaerakista is the toolchest.
 
 - `kista.http` - HTTP request identity: consistent header profiles
   (an honest tool profile and a complete browser ensemble), never
-  random user agents. The browser profile exists so automated
-  downloads can reach hosts that block generic user agents while
-  still identifying the actual client in the profile comment.
+  random user agents. The browser profile reaches hosts that block
+  generic user agents; the tool profile identifies the caller by
+  name and version.
 - `kista.sanitize` - filename and path component sanitizing.
 - `kista.fileops` - atomic writes and timestamp-preserving copy/move.
 - `kista.paths` - containment guard (`resolve_within`) and archive
@@ -47,7 +47,7 @@ The import name is `kista`:
 
 ```python
 from kista.sanitize import sanitize_filename
-from kista.http import browser_headers
+from kista.http import browser_profile, session_for
 ```
 
 ## License

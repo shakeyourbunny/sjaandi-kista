@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.3 (2026-10-19)
+
+Fix 12 findings from macOS review (Python 3.14). write_atomic and
+download handle long filenames. download requests identity encoding
+to prevent Content-Encoding decompression. arch detection: word
+boundaries on macOS patterns, armv8l correctly mapped to armhf.
+netfilter: removed overly broad path patterns. move_preserving:
+atomic non-overwrite via link, symlink preservation on cross-device.
+head_info returns timezone-aware datetime. Mount table read on
+macOS/FreeBSD. platformdirs declared, setuptools bumped for PEP 639.
+
 ## 0.8.2 (2026-10-05)
 
 Fix 32 review findings across sanitize, http, fileops, netfilter

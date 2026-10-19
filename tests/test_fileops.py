@@ -39,6 +39,26 @@ class TestWriteAtomic:
         with pytest.raises(FileNotFoundError):
             fileops.write_atomic(tmp_path / "no" / "dir" / "out.txt", b"x")
 
+    def test_long_filename_no_enametoolong(self, tmp_path):
+        long_name = "a" * 245 + ".txt"
+        target = tmp_path / long_name
+        fileops.write_atomic(target, b"payload")
+        assert target.read_bytes() == b"payload"
+
+
+class TestTempPrefix:
+    def test_short_name_unchanged(self):
+        assert fileops.temp_prefix("file.txt") == ".file.txt."
+
+    def test_long_name_truncated(self):
+        prefix = fileops.temp_prefix("a" * 250)
+        assert len(prefix.encode("utf-8")) + 8 <= 255
+
+    def test_surrogateescape_name(self):
+        name = b"caf\xe9.txt".decode("utf-8", "surrogateescape")
+        prefix = fileops.temp_prefix(name)
+        assert len(os.fsencode(prefix)) + 8 <= 255
+
 
 class TestCopyPreserving:
     def test_content_and_mtime_preserved(self, tmp_path):
@@ -77,3 +97,7 @@ class TestMovePreserving:
             fileops.move_preserving(src, dst)
         assert src.exists()
         assert dst.read_bytes() == b"b"
+
+    def test_source_must_be_file_or_symlink(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            fileops.move_preserving(tmp_path / "ghost", tmp_path / "dst")

@@ -35,9 +35,16 @@ class TestDetectArch:
     @pytest.mark.parametrize("filename, expected", [
         ("app-armhf.AppImage", "armhf"),
         ("app-armv7l.AppImage", "armhf"),
+        ("app-armv6.AppImage", "armhf"),
     ])
     def test_armhf(self, filename, expected):
         assert detect_arch(filename) == expected
+
+    def test_armv8_is_aarch64(self):
+        assert detect_arch("app-armv8.AppImage") == "aarch64"
+
+    def test_armv8l_is_armhf(self):
+        assert detect_arch("app-armv8l.AppImage") == "armhf"
 
     @pytest.mark.parametrize("filename", [
         "alarm-clock-1.2.AppImage",
@@ -76,6 +83,9 @@ class TestIsMacos:
         "machine-learning.tar.gz",
         "Darwinia-linux.tar.gz",
         "pineapple-jam.zip",
+        "dosx-1.2-linux-x86_64.AppImage",
+        "tarmac-2.0-linux.tar.gz",
+        "emac_tool-1.0.tar.gz",
     ])
     def test_non_macos(self, filename):
         assert is_macos(filename) is False

@@ -58,7 +58,7 @@ adstat
 # ── Tracking ──
 tracking
 tracker
-pixel
+pixel.
 beacon
 
 # ── Analytics / telemetry / monitoring ──

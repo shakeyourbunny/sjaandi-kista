@@ -95,6 +95,25 @@ class TestDownload:
         assert session.last_kwargs["timeout"] == 7
         assert session.last_kwargs["stream"] is True
 
+    def test_identity_encoding_sent(self, tmp_path):
+        session = FakeSession(FakeResponse([b"x"]))
+        http.download(session, "https://x/f", tmp_path / "f", timeout=5)
+        assert session.last_kwargs["headers"]["Accept-Encoding"] == "identity"
+
+    def test_caller_headers_cannot_override_identity(self, tmp_path):
+        session = FakeSession(FakeResponse([b"x"]))
+        http.download(
+            session, "https://x/f", tmp_path / "f", timeout=5,
+            headers={"Accept-Encoding": "gzip, deflate, br"},
+        )
+        assert session.last_kwargs["headers"]["Accept-Encoding"] == "identity"
+
+    def test_dangling_symlink_refused(self, tmp_path):
+        dest = tmp_path / "link"
+        dest.symlink_to(tmp_path / "nonexistent")
+        with pytest.raises(FileExistsError):
+            http.download(FakeSession(FakeResponse([b"x"])), "https://x/f", dest, timeout=5)
+
 
 class TestDelay:
     def test_single_value(self):
@@ -158,6 +177,14 @@ class TestHeadInfo:
         assert info.size_bytes is None
         assert info.last_modified is None
         assert info.etag is None
+
+    def test_last_modified_is_always_tz_aware(self):
+        session = FakeHeadSession({
+            "Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT",
+        })
+        info = http.head_info(session, "https://x/f", timeout=5)
+        assert info.last_modified is not None
+        assert info.last_modified.tzinfo is not None
 
     def test_error_status_raises(self):
         with pytest.raises(requests.HTTPError):

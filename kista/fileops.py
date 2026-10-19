@@ -20,12 +20,13 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_SETTLE_FS_TYPES = frozenset({"cifs", "smb", "smbfs", "fuse.mergerfs", "mergerfs"})
+_SETTLE_FS_TYPES = frozenset({
+    "cifs", "smb", "smbfs", "fuse.mergerfs", "mergerfs", "nfs", "nfs4",
+})
 _SETTLE_DELAY_DEFAULT = 2.0
 
-# Mount table: parsed once from /proc/mounts at import, cached for the
-# process lifetime. Maps resolved mountpoint string to filesystem type.
-# Sorted longest-first so the first prefix match is the deepest mount.
+# Mount table: frozen at import, longest mountpoint first.
+# Linux: /proc/mounts. macOS/FreeBSD: mount(8).
 _mount_table: list[tuple[str, str]] = []
 
 def _unescape_mount(s: str) -> str:
@@ -33,17 +34,43 @@ def _unescape_mount(s: str) -> str:
     return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), s)
 
 
-if platform.system() == "Linux":
-    try:
-        _raw: dict[str, str] = {}
-        with open("/proc/mounts", encoding="utf-8") as _f:
-            for _line in _f:
-                _parts = _line.split()
-                if len(_parts) >= 3:
-                    _raw[_unescape_mount(_parts[1])] = _parts[2]
-        _mount_table = sorted(_raw.items(), key=lambda kv: len(kv[0]), reverse=True)
-    except OSError:
-        pass
+def _read_mount_table() -> list[tuple[str, str]]:
+    """Parse the system mount table. Linux: /proc/mounts. macOS/BSD: mount(8)."""
+    raw: dict[str, str] = {}
+    system = platform.system()
+    if system == "Linux":
+        try:
+            with open("/proc/mounts", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        raw[_unescape_mount(parts[1])] = parts[2]
+        except OSError:
+            pass
+    elif system in ("Darwin", "FreeBSD"):
+        import subprocess  # nosec B404
+        try:
+            out = subprocess.run(
+                ["mount"], capture_output=True, text=True, timeout=5,  # nosec B603 B607
+                check=False,
+            )
+            for line in out.stdout.splitlines():
+                # Format: /dev/disk on /mountpoint (type, options)
+                parts = line.split(" on ", 1)
+                if len(parts) == 2:
+                    rest = parts[1]
+                    paren = rest.rfind("(")
+                    if paren > 0:
+                        mountpoint = rest[:paren].rstrip()
+                        type_opts = rest[paren + 1:].rstrip(")")
+                        fstype = type_opts.split(",")[0].strip()
+                        raw[mountpoint] = fstype
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return sorted(raw.items(), key=lambda kv: len(kv[0]), reverse=True)
+
+
+_mount_table = _read_mount_table()
 
 _settle_cache: dict[str, bool] = {}
 _SETTLE_CACHE_MAX = 256
@@ -65,13 +92,32 @@ def _needs_settle(path: Path) -> bool:
     return result
 
 
+_MKSTEMP_RANDOM_LEN = 8
+_NAME_MAX = 255
+
+
+def temp_prefix(name: str) -> str:
+    """Build a mkstemp prefix from a filename, truncated so the temp
+    name stays within the filesystem's 255-byte limit. Uses os.fsencode
+    to handle surrogateescape names from non-UTF-8 filesystems."""
+    prefix = f".{name}."
+    encoded = os.fsencode(prefix)
+    max_bytes = _NAME_MAX - _MKSTEMP_RANDOM_LEN
+    if len(encoded) <= max_bytes:
+        return prefix
+    trunc = prefix
+    while len(os.fsencode(trunc)) > max_bytes and trunc:
+        trunc = trunc[:-1]
+    return trunc or "."
+
+
 def write_atomic(path: str | Path, data: bytes, mode: int = 0o644) -> None:
     """Write via temp file in the same directory plus rename. On mergerfs
     the EXDEV fallback is not atomic and not crash-safe."""
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError(f"data must be bytes, got {type(data).__name__}")
     path = Path(path)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=temp_prefix(path.name))
     exdev_copy_failed = False
     try:
         with os.fdopen(fd, "wb") as f:
@@ -222,31 +268,62 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
     before verifying size and mtime.
     """
     src, dst = Path(src), Path(dst)
-    if not src.is_file():
+    if not src.is_file() and not src.is_symlink():
         raise FileNotFoundError(f"source is not a file: {src}")
-    if dst.exists():
+
+    _LINK_FALLBACK = (
+        errno.EXDEV, errno.EPERM, errno.ENOSYS, errno.EMLINK,
+        getattr(errno, "ENOTSUP", -1),
+        getattr(errno, "EOPNOTSUPP", -1),
+    )
+
+    # Same device: link+unlink is atomic and non-overwriting.
+    try:
+        os.link(src, dst, follow_symlinks=False)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            raise FileExistsError(f"target already exists: {dst}") from None
+        if e.errno not in _LINK_FALLBACK:
+            raise
+    else:
+        try:
+            os.unlink(src)
+        except OSError:
+            # Link succeeded but unlink failed: remove dst, re-raise.
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
+            raise
+        return
+
+    # Cross-device or no hardlink support: copy then unlink.
+    if dst.exists() or dst.is_symlink():
         raise FileExistsError(f"target already exists: {dst}")
     try:
-        os.rename(src, dst)
-        return
-    except OSError as e:
-        if e.errno != errno.EXDEV:
-            raise
-    try:
-        shutil.copy2(src, dst)
+        shutil.copy2(src, dst, follow_symlinks=False)
     except BaseException:
-        if dst.exists():
+        if dst.exists() or dst.is_symlink():
             dst.unlink()
         raise
     if _needs_settle(dst):
         time.sleep(_SETTLE_DELAY_DEFAULT)
-    if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
-        dst.unlink()
-        raise OSError(f"mtime not preserved copying {src} -> {dst}")
-    if dst.stat().st_size != src.stat().st_size:
-        dst.unlink()
-        raise OSError(f"size mismatch after copy: {src} -> {dst}")
-    src.unlink()
+    # Verify only for regular files; symlinks have no independent mtime.
+    if not src.is_symlink():
+        if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
+            dst.unlink()
+            raise OSError(f"mtime not preserved copying {src} -> {dst}")
+        if dst.stat().st_size != src.stat().st_size:
+            dst.unlink()
+            raise OSError(f"size mismatch after copy: {src} -> {dst}")
+    try:
+        src.unlink()
+    except OSError:
+        try:
+            dst.unlink()
+        except OSError:
+            pass
+        raise
 
 
 from kista.dt import utc_now  # re-export for backwards compatibility
@@ -259,6 +336,7 @@ __all__ = [
     "prune_candidates",
     "remove_tree",
     "stamp_http_mtime",
+    "temp_prefix",
     "utc_now",
     "write_atomic",
 ]
@@ -352,6 +430,9 @@ def remove_tree(target, within, *, follow_mounts: bool = False,
         if _dev(base_real) != root_dev:
             raise ValueError(f"target is on a different device than base: {tgt_real}")
 
+    if not follow_mounts:
+        _assert_single_fs(tgt_real, root_dev)
+
     if dry_run:
         out = [tgt_real]
         for root, dirs, files in os.walk(tgt_real, followlinks=False):
@@ -362,7 +443,6 @@ def remove_tree(target, within, *, follow_mounts: bool = False,
     if follow_mounts:
         shutil.rmtree(tgt_real)
     else:
-        _assert_single_fs(tgt_real, root_dev)  # fail-fast, nothing deleted
         _rmtree_single_fs(tgt_real, root_dev)
     _fsync_dir(tgt_real.parent)
     return [tgt_real]

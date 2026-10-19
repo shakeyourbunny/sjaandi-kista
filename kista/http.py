@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import errno
 import http.cookiejar
 import importlib.util
 import logging
@@ -16,7 +17,7 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -273,7 +274,6 @@ def cached_session_for(
         ) from e
 
     if cache_dir is None:
-        # platformdirs comes in transitively with requests-cache
         from platformdirs import user_cache_dir
         cache_dir = Path(user_cache_dir(cache_name))
     cache_dir = Path(cache_dir)
@@ -317,12 +317,21 @@ def download(
     if not url or not url.strip():
         raise ValueError("url must not be empty")
     dest = Path(dest)
-    if dest.exists():
+    if os.path.lexists(dest):
         raise FileExistsError(f"target already exists: {dest}")
 
-    response = session.get(url, headers=headers, timeout=timeout, stream=True)
+    # Request no transfer encoding so the server sends bytes as stored.
+    dl_headers = dict(headers) if headers else {}
+    dl_headers["Accept-Encoding"] = "identity"
+    response = session.get(url, headers=dl_headers, timeout=timeout, stream=True)
     try:
         response.raise_for_status()
+        ce = response.headers.get("Content-Encoding", "").strip().lower()
+        if ce and ce != "identity":
+            logger.warning(
+                "Server sent Content-Encoding %r despite identity request for %s"
+                " - file may be decoded on disk", ce, url,
+            )
         size = 0
         total = None
         length = response.headers.get("Content-Length")
@@ -331,7 +340,8 @@ def download(
                 total = int(length)
             except ValueError:
                 pass
-        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
+        prefix = fileops.temp_prefix(dest.name)
+        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=prefix)
         try:
             with os.fdopen(fd, "wb") as f:
                 for chunk in response.iter_content(chunk_size):
@@ -342,7 +352,14 @@ def download(
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp_name, 0o644)
-            os.replace(tmp_name, dest)
+            # Atomic non-overwrite: link+unlink instead of replace.
+            try:
+                os.link(tmp_name, dest)
+                os.unlink(tmp_name)
+            except OSError as e:
+                if e.errno == errno.EEXIST:
+                    raise FileExistsError(f"target appeared during download: {dest}") from None
+                os.replace(tmp_name, dest)
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
@@ -381,6 +398,8 @@ def head_info(session, url: str, *, timeout: float,
     if lm_header:
         try:
             last_modified = parsedate_to_datetime(lm_header)
+            if last_modified.tzinfo is None:
+                last_modified = last_modified.replace(tzinfo=UTC)
         except (ValueError, TypeError):
             logger.warning("Unparseable Last-Modified %r for %s", lm_header, url)
     return RemoteInfo(

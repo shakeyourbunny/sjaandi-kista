@@ -21,18 +21,19 @@ ARCH_PATTERNS: dict[str, re.Pattern[str]] = {
         r"(?<![a-z0-9])(x86_64|x86-64|amd64|x64)(?![a-z0-9])", re.IGNORECASE
     ),
     "aarch64": re.compile(
-        r"(?<![a-z0-9])(aarch64|arm64)(?![a-z0-9])", re.IGNORECASE
+        r"(?<![a-z0-9])(aarch64|arm64|armv8)(?![a-z0-9])", re.IGNORECASE
     ),
     "i686": re.compile(
         r"(?<![a-z0-9])(i[36]86|i386)(?![a-z0-9])", re.IGNORECASE
     ),
     "armhf": re.compile(
-        r"(?<![a-z0-9])(armhf|armv[0-9]+l?)(?![a-z0-9])", re.IGNORECASE
+        r"(?<![a-z0-9])(armhf|armv[678]l|armv[67])(?![a-z0-9])", re.IGNORECASE
     ),
 }
 
 _MACOS_RE = re.compile(
-    r"(?:macos|osx|(?<![a-z])darwin(?![a-z])|mac[-_.]|(?<![a-z])apple(?![a-z])|\.dmg$|\.sit$|\.hqx$)",
+    r"(?:macos|(?<![a-z])osx(?![a-z])|(?<![a-z])darwin(?![a-z])"
+    r"|(?<![a-z])mac[-_.]|(?<![a-z])apple(?![a-z])|\.dmg$|\.sit$|\.hqx$)",
     re.IGNORECASE,
 )
 

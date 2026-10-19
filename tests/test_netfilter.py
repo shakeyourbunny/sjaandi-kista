@@ -43,6 +43,9 @@ class TestJunkHost:
         # must not defeat the substring match
         assert netfilter.is_junk_host("doubleclick.net") is True
 
+    def test_pixelfed_not_junk(self):
+        assert netfilter.is_junk_host("pixelfed.social") is False
+
 
 class TestJunkPath:
     def test_wp_admin_is_junk(self):
@@ -53,6 +56,15 @@ class TestJunkPath:
 
     def test_case_insensitive(self):
         assert netfilter.is_junk_path("/WP-ADMIN/") is True
+
+    @pytest.mark.parametrize("path", [
+        "/api/v1/data",
+        "/rss/heise-atom.xml",
+        "/sso/callback",
+        "/cgi/script.py",
+    ])
+    def test_legitimate_paths_not_junk(self, path):
+        assert netfilter.is_junk_path(path) is False
 
 
 class TestJunkUrl:

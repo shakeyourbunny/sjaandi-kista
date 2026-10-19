@@ -36,7 +36,6 @@
 /logout.php
 /auth/
 /oauth/
-/sso/
 /account/
 /my-account/
 
@@ -81,15 +80,7 @@
 /basket/
 /wishlist/
 
-# ── API endpoints ──
-/api/
-/rest/
-/graphql
-
-# ── Feeds ──
-/feed/
-/feeds/
-/rss/
+# ── Feed and sitemap files (individual files, not path prefixes) ──
 /rss.xml
 /atom.xml
 /feed.xml
@@ -106,7 +97,6 @@
 
 # ── Server infrastructure ──
 /cgi-bin/
-/cgi/
 /phpmyadmin/
 /cpanel/
 /webmail/
