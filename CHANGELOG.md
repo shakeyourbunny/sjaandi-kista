@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 (2026-10-26)
+
+copy_preserving and move_preserving take verify_content, which checks
+the copy byte for byte before the original is replaced or removed.
+Without it both behave as before.
+
 ## 0.8.3 (2026-10-19)
 
 Fix 12 findings from macOS review (Python 3.14). write_atomic and

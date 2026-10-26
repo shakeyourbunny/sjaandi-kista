@@ -245,28 +245,139 @@ def available_name(path: str | Path) -> Path:
     raise FileExistsError(f"no available name variant for {path}")
 
 
-def copy_preserving(src: str | Path, dst: str | Path) -> None:
-    """Copy with metadata; timestamp preservation is the point.
+_COMPARE_CHUNK = 1 << 20
 
-    On CIFS or mergerfs targets, pauses after writing to let delayed
-    writes settle before the caller proceeds to verify or delete.
-    """
+
+def _same_bytes(a: Path, b: Path) -> bool:
+    # not filecmp.cmp: it caches outcomes by path, size and mtime, so a second
+    # corrupt copy to the same path would pass
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        while True:
+            ca, cb = fa.read(_COMPARE_CHUNK), fb.read(_COMPARE_CHUNK)
+            if ca != cb:
+                return False
+            if not ca:
+                return True
+
+
+def _flush(path: Path) -> None:
+    # without fsync a CIFS or NFS read-back compares the client cache, not what
+    # reached the server; only Linux can also drop the cached pages
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as e:
+            # Windows syncs only a handle opened for writing; a read-only copy stays unsynced
+            if e.errno not in (errno.EBADF, errno.EINVAL, errno.EACCES):
+                raise
+            if os.access(path, os.W_OK):
+                wfd = os.open(path, os.O_WRONLY)
+                try:
+                    os.fsync(wfd)
+                finally:
+                    os.close(wfd)
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    finally:
+        os.close(fd)
+
+
+def _verify_same_content(src: Path, dst: Path) -> None:
+    try:
+        _flush(dst)
+        same = _same_bytes(src, dst)
+    except BaseException:
+        # an interrupted compare must not leave a copy that looks checked
+        try:
+            dst.unlink()
+        except OSError:
+            pass
+        raise
+    if not same:
+        dst.unlink()
+        raise OSError(f"content differs after copy: {src} -> {dst}")
+
+
+def copy_preserving(src: str | Path, dst: str | Path, *,
+                    verify_content: bool = False) -> None:
+    """Copy with metadata, pausing on CIFS or mergerfs so delayed writes settle;
+    verify_content renames a byte-checked temp copy over the target instead."""
     src, dst = Path(src), Path(dst)
     if not src.is_file():
         raise FileNotFoundError(f"source is not a file: {src}")
-    shutil.copy2(src, dst)
-    if _needs_settle(dst):
-        time.sleep(_SETTLE_DELAY_DEFAULT)
+    if not verify_content:
+        written = Path(shutil.copy2(src, dst))
+        if _needs_settle(written):
+            time.sleep(_SETTLE_DELAY_DEFAULT)
+        return
+    target = dst / src.name if dst.is_dir() else dst
+    # the verified copy replaces the target's name, where copy2 writes through it
+    if target.is_symlink():
+        raise ValueError(f"verify_content refuses a symlink as target: {target}")
+    if target.exists():
+        if os.path.samefile(src, target):
+            raise ValueError(f"source and target are the same file: {target}")
+        if not target.is_file():
+            raise ValueError(f"verify_content needs a regular file as target: {target}")
+        if target.stat().st_nlink > 1:
+            raise ValueError(f"verify_content refuses a target with another hard link: {target}")
+    # a failure may only remove what this call wrote: the temp copy
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=temp_prefix(target.name))
+    tmp = Path(tmp_name)
+    try:
+        os.close(fd)
+        shutil.copy2(src, tmp)
+        if _needs_settle(tmp):
+            time.sleep(_SETTLE_DELAY_DEFAULT)
+        _verify_same_content(src, tmp)
+        _replace_verified(src, tmp, target)
+    except BaseException:
+        if os.path.lexists(tmp):
+            tmp.unlink()
+        raise
 
 
-def move_preserving(src: str | Path, dst: str | Path) -> None:
-    """Move that survives filesystem boundaries and verifies the
-    timestamp landed before the source is removed. Refuses to
-    overwrite an existing target.
+def _replace_verified(src: Path, tmp: Path, target: Path) -> None:
+    try:
+        os.replace(tmp, target)
+        return
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+    # mergerfs can raise EXDEV inside one directory; without a rename an existing
+    # target could only be overwritten in place, losing it if that copy fails
+    refused = OSError(errno.EXDEV, f"cannot replace {target} without a rename; old target kept")
+    if os.path.lexists(target):
+        raise refused
+    created = False
+    try:
+        with open(tmp, "rb") as fin:
+            # exclusive create: a name that appears after the check is never written through
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            try:
+                fd = os.open(target, flags, 0o600)
+            except FileExistsError:
+                raise refused from None
+            created = True
+            with os.fdopen(fd, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
+        shutil.copystat(tmp, target)
+        if _needs_settle(target):
+            time.sleep(_SETTLE_DELAY_DEFAULT)
+    except BaseException:
+        if created and os.path.lexists(target):
+            target.unlink()
+        raise
+    _verify_same_content(src, target)
+    tmp.unlink()
 
-    On CIFS or mergerfs targets, pauses after cross-device copy
-    before verifying size and mtime.
-    """
+
+def move_preserving(src: str | Path, dst: str | Path, *,
+                    verify_content: bool = False) -> None:
+    """Move across filesystems without overwriting a target; a copied move
+    checks mtime and size, and with verify_content the bytes, before the
+    source goes."""
     src, dst = Path(src), Path(dst)
     if not src.is_file() and not src.is_symlink():
         raise FileNotFoundError(f"source is not a file: {src}")
@@ -300,22 +411,23 @@ def move_preserving(src: str | Path, dst: str | Path) -> None:
     # Cross-device or no hardlink support: copy then unlink.
     if dst.exists() or dst.is_symlink():
         raise FileExistsError(f"target already exists: {dst}")
+    # dst was absent at the check above; removing it on failure assumes no concurrent writer
     try:
         shutil.copy2(src, dst, follow_symlinks=False)
+        if _needs_settle(dst):
+            time.sleep(_SETTLE_DELAY_DEFAULT)
+        # symlinks have no independent mtime
+        if not src.is_symlink():
+            if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
+                raise OSError(f"mtime not preserved copying {src} -> {dst}")
+            if dst.stat().st_size != src.stat().st_size:
+                raise OSError(f"size mismatch after copy: {src} -> {dst}")
+            if verify_content:
+                _verify_same_content(src, dst)
     except BaseException:
-        if dst.exists() or dst.is_symlink():
+        if os.path.lexists(dst):
             dst.unlink()
         raise
-    if _needs_settle(dst):
-        time.sleep(_SETTLE_DELAY_DEFAULT)
-    # Verify only for regular files; symlinks have no independent mtime.
-    if not src.is_symlink():
-        if int(dst.stat().st_mtime) != int(src.stat().st_mtime):
-            dst.unlink()
-            raise OSError(f"mtime not preserved copying {src} -> {dst}")
-        if dst.stat().st_size != src.stat().st_size:
-            dst.unlink()
-            raise OSError(f"size mismatch after copy: {src} -> {dst}")
     try:
         src.unlink()
     except OSError:
