@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 (2026-11-20)
+
+The browser profile follows Chrome 158. The client hint header names in the
+returned headers are now lower case (sec-ch-ua and its two siblings): look them
+up case-insensitively.
+
 ## 0.9.0 (2026-10-26)
 
 copy_preserving and move_preserving take verify_content, which checks
