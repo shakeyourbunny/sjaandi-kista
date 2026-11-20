@@ -29,13 +29,15 @@ from kista import fileops
 logger = logging.getLogger(__name__)
 
 # One pinned browser identity. Bumping this constant moves the UA
-# string and Sec-Ch-Ua together; nothing else may hardcode a version.
-CHROME_VERSION = "152"
+# string and sec-ch-ua together; nothing else may hardcode a version.
+CHROME_VERSION = "158"
 
-# GREASE brand for Chromium 152 (captured from Vivaldi 8.2, Linux,
-# 2026-10-04). The brand string and v= change with CHROME_VERSION -
-# update both together.
-_SEC_CH_UA = f'"Not?A_Brand";v="24", "Chromium";v="{CHROME_VERSION}"'
+# Chrome 158 Linux brand list, captured 2026-11-20; recapture the GREASE brand,
+# its v= and the order on every CHROME_VERSION bump.
+_SEC_CH_UA = (
+    f'"Chromium";v="{CHROME_VERSION}", "Not.A/Brand";v="24", '
+    f'"Google Chrome";v="{CHROME_VERSION}"'
+)
 
 _UA_BROWSER = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -51,14 +53,14 @@ _SCRIPT_EXTS = {".js", ".mjs"}
 _ACCEPT = {
     "document": (
         "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,"
+        "q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,"
         "application/signed-exchange;v=b3;q=0.7"
     ),
     "feed": (
         "application/rss+xml,application/atom+xml,"
         "application/feed+json,application/xml;q=0.9,*/*;q=0.8"
     ),
-    "image": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "image": "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "style": "text/css,*/*;q=0.1",
     "script": "*/*",
     "api": "application/json",
@@ -157,10 +159,12 @@ class BrowserProfile(Profile):
     def identity_headers(self) -> dict[str, str]:
         return {
             "User-Agent": _UA_BROWSER,
-            "Sec-Ch-Ua": _SEC_CH_UA,
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Linux"',
-            "Accept-Language": "en",
+            # Chrome writes the client hints in lower case, also over HTTP/1.1 (capture of
+            # 2026-11-20), and the spelling of a header name is part of the fingerprint there.
+            "sec-ch-ua": _SEC_CH_UA,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Linux"',
+            "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": supported_encodings(),
         }
 
@@ -182,6 +186,8 @@ class BrowserProfile(Profile):
             headers["Sec-Fetch-Dest"] = kind
             headers["Sec-Fetch-Mode"] = "no-cors"
         headers["Sec-Fetch-Site"] = _sec_fetch_site(url, referer)
+        # No Priority: Chrome sent it on HTTP/2 (2026-11-12) but not over HTTP/1.1 (2026-11-20),
+        # and kista speaks HTTP/1.1.
         if referer:
             headers["Referer"] = referer
         return headers

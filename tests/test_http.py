@@ -16,13 +16,13 @@ class TestBrowserProfile:
         headers = profile.headers_for("https://example.com/")
         ua = headers["User-Agent"]
         assert f"Chrome/{http.CHROME_VERSION}.0.0.0" in ua
-        assert f'"Chromium";v="{http.CHROME_VERSION}"' in headers["Sec-Ch-Ua"]
+        assert f'"Chromium";v="{http.CHROME_VERSION}"' in headers["sec-ch-ua"]
 
     def test_platform_consistent_linux(self):
         headers = http.browser_profile().headers_for("https://example.com/")
         assert "X11; Linux x86_64" in headers["User-Agent"]
-        assert headers["Sec-Ch-Ua-Platform"] == '"Linux"'
-        assert headers["Sec-Ch-Ua-Mobile"] == "?0"
+        assert headers["sec-ch-ua-platform"] == '"Linux"'
+        assert headers["sec-ch-ua-mobile"] == "?0"
 
     def test_document_kind_headers(self):
         headers = http.browser_profile().headers_for("https://example.com/page")
@@ -42,7 +42,7 @@ class TestBrowserProfile:
     def test_image_kind_from_extension(self):
         headers = http.browser_profile().headers_for("https://example.com/logo.png")
         assert headers["Sec-Fetch-Dest"] == "image"
-        assert headers["Accept"].startswith("image/avif")
+        assert headers["Accept"].startswith("image/jxl")
 
     def test_explicit_kind_overrides_extension(self):
         headers = http.browser_profile().headers_for(
@@ -101,30 +101,117 @@ class TestBrowserProfile:
 
 
 class TestReferenceCapture:
-    # Chrome 152 on Linux opening https://myip.ch/, as captured 2026-10-04.
-    # Cache-Control/Pragma no-cache from DevTools "Disable cache" removed:
-    # not normal browser behavior, sabotages requests-cache.
-    CAPTURE: ClassVar[dict[str, str]] = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
-                  "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "en",
+    # The document comes from Chrome 158 on myip.ch over HTTP/1.1 (Copy as cURL, 2026-11-20);
+    # the other kinds come from Chrome 157 over HTTP/2 (2026-11-12), and we assume 158 sends
+    # them alike.
+    UA_158: ClassVar[str] = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36")
+    CLIENT_HINTS: ClassVar[dict[str, str]] = {
+        "sec-ch-ua": '"Chromium";v="158", "Not.A/Brand";v="24", "Google Chrome";v="158"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+    }
+    DOCUMENT: ClassVar[dict[str, str]] = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,"
+                  "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                  "application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
-        "Sec-Ch-Ua": '"Not?A_Brand";v="24", "Chromium";v="152"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Linux"',
+        "User-Agent": UA_158,
+        **CLIENT_HINTS,
+    }
+    IMAGE: ClassVar[dict[str, str]] = {
+        "Accept": "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://orf.at/",
+        "Sec-Fetch-Dest": "image",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-site",
+        "User-Agent": UA_158,
+        **CLIENT_HINTS,
     }
 
-    def test_a_document_request_matches_the_capture(self):
+    # The capture omits Cache-Control and Pragma, which DevTools "Disable cache" adds;
+    # Sec-Fetch-Storage-Access describes the browser's own cookie state, not Chrome.
+    STYLE: ClassVar[dict[str, str]] = {
+        "Accept": "text/css,*/*;q=0.1",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.osnews.com/",
+        "Sec-Fetch-Dest": "style",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "cross-site",
+        "User-Agent": UA_158,
+        **CLIENT_HINTS,
+    }
+
+    SCRIPT: ClassVar[dict[str, str]] = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.osnews.com/",
+        "Sec-Fetch-Dest": "script",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "cross-site",
+        "User-Agent": UA_158,
+        **CLIENT_HINTS,
+    }
+
+    # A page's own fetch(). Chrome sent Accept */* because the script set none;
+    # kista's api kind asks for JSON on purpose, as a page script calling an API would.
+    API: ClassVar[dict[str, str]] = {
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.zoom-platform.com/product/x",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": UA_158,
+        **CLIENT_HINTS,
+    }
+
+    @staticmethod
+    def _sent(url, **kwargs):
         headers = requests.structures.CaseInsensitiveDict(
-            http.browser_profile().headers_for("https://myip.ch/"))
+            http.browser_profile().headers_for(url, **kwargs))
         assert headers.pop("Accept-Encoding") == http.supported_encodings()
-        assert dict(headers) == requests.structures.CaseInsensitiveDict(self.CAPTURE)
+        return headers
+
+    def test_a_document_request_matches_the_capture(self):
+        sent = self._sent("https://www.dosbox-automation.org/")
+        assert dict(sent) == requests.structures.CaseInsensitiveDict(self.DOCUMENT)
+
+    def test_a_style_request_matches_the_capture(self):
+        sent = self._sent(
+            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.1/css/all.min.css",
+            referer="https://www.osnews.com/")
+        assert dict(sent) == requests.structures.CaseInsensitiveDict(self.STYLE)
+
+    def test_a_script_request_matches_the_capture(self):
+        sent = self._sent("https://www.googletagmanager.com/gtag/js?id=x",
+                          kind="script", referer="https://www.osnews.com/")
+        assert dict(sent) == requests.structures.CaseInsensitiveDict(self.SCRIPT)
+
+    def test_an_api_request_matches_the_capture(self):
+        sent = self._sent("https://www.zoom-platform.com/public/user", kind="api",
+                          referer="https://www.zoom-platform.com/product/x")
+        assert dict(sent) == requests.structures.CaseInsensitiveDict(self.API)
+
+    def test_an_image_request_matches_the_capture(self):
+        sent = self._sent("https://soph-assets.orf.at/sis/image/x/teaser.webp",
+                          referer="https://orf.at/")
+        assert dict(sent) == requests.structures.CaseInsensitiveDict(self.IMAGE)
+
+    def test_no_priority_over_http11(self):
+        for kind in http.KINDS:
+            sent = http.browser_profile().headers_for("https://example.com/", kind=kind)
+            assert "priority" not in {name.lower() for name in sent}
+
+    def test_header_names_are_spelled_as_captured(self):
+        sent = self._sent("https://www.dosbox-automation.org/")
+        assert sorted(sent) == sorted(self.DOCUMENT)
 
     def test_no_cache_headers_absent(self):
         headers = http.browser_profile().headers_for("https://example.com/")
@@ -156,8 +243,9 @@ class TestToolProfile:
 
     def test_no_browser_theater(self):
         headers = http.tool_profile("t", "1").headers_for("https://example.com/")
-        assert "Sec-Ch-Ua" not in headers
-        assert "Sec-Fetch-Dest" not in headers
+        names = {name.lower() for name in headers}
+        assert "sec-ch-ua" not in names
+        assert "sec-fetch-dest" not in names
 
     def test_empty_name_rejected(self):
         with pytest.raises(ValueError):
